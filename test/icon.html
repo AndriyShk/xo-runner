@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <title>XO Pulse Runner — іконка</title>
+    <style>
+      body { margin: 0; padding: 20px; background: #f3f4f6; font: 12px sans-serif; }
+      .row { display: flex; gap: 20px; align-items: flex-end; }
+      canvas { background: transparent; image-rendering: pixelated; }
+      .cell { text-align: center; }
+      .chk { background: #dbeafe; }
+    </style>
+  </head>
+  <body>
+    <div class="row" id="row"></div>
+    <script src="../src/character.js"></script>
+    <script>
+      // Стоїть у профіль-3/4, крило трохи розкинуте — читається на маленькому
+      // розмірі краще, ніж будь-яка з циклових поз бігу.
+      function drawIcon(size, checker) {
+        const cv = document.createElement('canvas');
+        cv.width = size; cv.height = size;
+        const ctx = cv.getContext('2d');
+        if (checker) {
+          const n = 8;
+          for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+            ctx.fillStyle = (x + y) % 2 ? '#e5e7eb' : '#ffffff';
+            ctx.fillRect((x * size) / n, (y * size) / n, size / n, size / n);
+          }
+        }
+        // Виміряний bbox персонажа (стан 'look', scale=1): 33.4×50 локальних
+        // одиниць, центр відносно лап (0,0) — (-7.7, -23.7). Звідси
+        // походять множники нижче: заповнюємо 88% висоти й центруємо bbox,
+        // а не точку опори лап, інакше він їде вбік через хвіст і крило.
+        const scale = (0.88 * size) / 50 / 0.78;
+        const s = scale * 0.78;
+        const originX = size / 2 - s * -7.7;
+        const originY = size / 2 - s * -23.7;
+        XOChicken.draw(ctx, {
+          x: originX,
+          y: originY,
+          dir: 1,
+          state: 'look',
+          phase: 0,
+          t: 0.3,
+          scale,
+          angle: 0,
+        });
+        return cv;
+      }
+
+      const row = document.getElementById('row');
+      for (const size of [128, 48, 16]) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        const cv = drawIcon(size, true);
+        cv.style.width = Math.max(size, 64) + 'px';
+        cv.style.height = Math.max(size, 64) + 'px';
+        cv.id = 'icon' + size;
+        cell.appendChild(cv);
+        const lbl = document.createElement('div');
+        lbl.textContent = size + '×' + size;
+        cell.appendChild(lbl);
+        row.appendChild(cell);
+      }
+
+      window.__exportIcon = (size) => {
+        const cv = drawIcon(size, false);
+        return cv.toDataURL('image/png');
+      };
+    </script>
+  </body>
+</html>

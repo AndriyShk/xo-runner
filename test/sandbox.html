@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <title>XO Pulse Runner — пісочниця</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #fff;
+        color: #111827;
+        font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .wrap {
+        position: relative;
+        width: 884px;
+        height: 320px;
+        touch-action: pan-y;
+      }
+      .legend { margin-top: 10px; color: #6b7280; }
+      button { font: inherit; padding: 4px 10px; margin-right: 6px; }
+    </style>
+  </head>
+  <body>
+    <!-- Імітація структури графіка на beta.xo.market/pulse -->
+    <div class="wrap"><canvas id="chart"></canvas></div>
+    <div class="legend">
+      <!-- імітація таймера раунду: розширення шукає MM:SS поряд із «Ends in» -->
+      <span><span>Ends in</span><span id="clock">0:40</span></span>
+      <button id="calm">спокійний ринок</button>
+      <button id="wild">волатильність</button>
+      <button id="short">раунд 20с</button>
+      <span id="info"></span>
+    </div>
+
+    <script>
+      // ---- імітація живого графіка ----
+      const cv = document.getElementById('chart');
+      const dpr = window.devicePixelRatio || 1;
+      const W = 884, H = 320;
+      cv.style.width = W + 'px';
+      cv.style.height = H + 'px';
+      cv.width = W * dpr;
+      cv.height = H * dpr;
+      const ctx = cv.getContext('2d');
+
+      // таймер раунду
+      let roundLen = 40, roundStart = Date.now();
+      document.getElementById('short').onclick = () => { roundLen = 20; roundStart = Date.now(); };
+      setInterval(() => {
+        let left = roundLen - Math.floor((Date.now() - roundStart) / 1000);
+        if (left < 0) { roundStart = Date.now(); left = roundLen; }
+        document.getElementById('clock').textContent =
+          Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+      }, 250);
+
+      let vol = 1;
+      document.getElementById('calm').onclick = () => (vol = 0.4);
+      document.getElementById('wild').onclick = () => (vol = 3);
+
+      const N = 220;
+      let price = 62500;
+      const pts = [];
+      for (let i = 0; i < N; i++) {
+        price += (Math.random() - 0.5) * 22;
+        pts.push(price);
+      }
+      setInterval(() => {
+        price += (Math.random() - 0.5) * 22 * vol + Math.sin(Date.now() / 4000) * 4;
+        pts.push(price);
+        if (pts.length > N) pts.shift();
+      }, 60);
+
+      // ?opaque=1 — canvas із непрозорим фоном (гірший випадок для автопошуку
+      // кольору: напівпрозора заливка під лінією стає суцільним кольором)
+      const OPAQUE = new URLSearchParams(location.search).has('opaque');
+
+      function draw() {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, W, H);
+        if (OPAQUE) {
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, W, H);
+        }
+
+        const min = Math.min(...pts) - 12;
+        const max = Math.max(...pts) + 12;
+        const xs = (i) => (i / (N - 1)) * (W - 40) + 20;
+        const ys = (p) => H - 30 - ((p - min) / (max - min)) * (H - 70);
+
+        // сітка
+        ctx.strokeStyle = '#f1f2f4';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 6; i++) {
+          const x = (i / 6) * W;
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, H);
+          ctx.stroke();
+        }
+
+        // пунктирні допоміжні лінії (як «live BTC» і «price to beat»)
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = '#9ca3af';
+        ctx.beginPath();
+        ctx.moveTo(0, ys(pts[pts.length - 1]) + 18);
+        ctx.lineTo(W, ys(pts[pts.length - 1]) + 18);
+        ctx.stroke();
+        ctx.strokeStyle = '#111827';
+        ctx.beginPath();
+        ctx.moveTo(0, ys(pts[0]));
+        ctx.lineTo(W, ys(pts[0]));
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // заливка під лінією
+        ctx.beginPath();
+        ctx.moveTo(xs(0), H);
+        pts.forEach((p, i) => ctx.lineTo(xs(i), ys(p)));
+        ctx.lineTo(xs(pts.length - 1), H);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(139,92,246,0.14)';
+        ctx.fill();
+
+        // сама лінія
+        ctx.beginPath();
+        pts.forEach((p, i) => (i ? ctx.lineTo(xs(i), ys(p)) : ctx.moveTo(xs(i), ys(p))));
+        ctx.strokeStyle = '#8b5cf6';
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+
+        document.getElementById('info').textContent =
+          '$' + pts[pts.length - 1].toFixed(2);
+        requestAnimationFrame(draw);
+      }
+      draw();
+    </script>
+
+    <!-- той самий файл, що й у розширенні -->
+    <script src="../src/character.js"></script>
+    <script src="../src/content.js"></script>
+  </body>
+</html>

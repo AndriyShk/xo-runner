@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <title>XO Pulse Runner — персонаж</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #fff;
+        font: 12px -apple-system, sans-serif;
+        color: #6b7280;
+      }
+      canvas { display: block; }
+      label { margin-right: 14px; }
+    </style>
+  </head>
+  <body>
+    <p>
+      Ряди: біг · ходьба · клює · махає · чухається · дивиться вгору · стрибок через бар'єр · падіння · щучка.
+      <label>масштаб <input id="sc" type="range" min="0.6" max="4" step="0.1" value="2.6" /></label>
+      <span id="scv"></span>
+    </p>
+    <canvas id="stage" width="1760" height="2900" style="width:880px;height:1450px"></canvas>
+
+    <script src="../src/character.js"></script>
+    <script>
+      const ctx = document.getElementById('stage').getContext('2d');
+      const sc = document.getElementById('sc');
+      sc.oninput = () => (document.getElementById('scv').textContent = sc.value);
+      sc.oninput();
+
+      function render(now) {
+        const t = now / 1000;
+        const S = +sc.value;
+        ctx.setTransform(2, 0, 0, 2, 0, 0);
+        ctx.clearRect(0, 0, 880, 1450);
+
+        const rows = [
+          ['run', 130],
+          ['walk', 270],
+          ['peck', 410],
+          ['flap', 550],
+          ['scratch', 690],
+          ['look', 830],
+          ['jump', 970],
+          ['trip', 1110],
+          ['dive', 1250],
+        ];
+        ctx.strokeStyle = '#e5e7eb';
+        ctx.lineWidth = 1;
+        for (const [state, y] of rows) {
+          ctx.beginPath();
+          ctx.moveTo(0, y + 0.5);
+          ctx.lineTo(880, y + 0.5);
+          ctx.stroke();
+          ctx.fillStyle = '#9ca3af';
+          ctx.fillText(state, 4, y - 4);
+          for (let i = 0; i < 8; i++) {
+            XOChicken.draw(ctx, {
+              x: 70 + i * 100,
+              y,
+              dir: 1,
+              state,
+              phase: (i / 8) * Math.PI * 2,
+              t: state === 'rest' ? i * 0.31 : t,
+              scale: S,
+              // у щучці нахил задає той, хто малює — показуємо різні кути
+              angle: state === 'dive' ? -0.5 + i * 0.22 : state === 'trip' ? 1.15 : 0,
+            });
+            if (state === 'jump') {
+              XOChicken.drawHurdle(ctx, { x: 70 + i * 100 + 6, y, scale: S });
+            }
+          }
+        }
+
+        // живий ряд: різні нахили та напрямки
+        const y = 1390;
+        const angles = [-0.5, -0.25, 0, 0.25, 0.5];
+        for (let i = 0; i < angles.length; i++) {
+          const x = 110 + i * 165;
+          ctx.strokeStyle = '#8b5cf6';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x - 70, y + Math.tan(angles[i]) * -70);
+          ctx.lineTo(x + 40, y + Math.tan(angles[i]) * 40);
+          ctx.stroke();
+          XOChicken.draw(ctx, {
+            x,
+            y,
+            dir: i < 3 ? 1 : -1,
+            state: ['run', 'walk', 'rest', 'walk', 'run'][i],
+            phase: t * 11,
+            t,
+            scale: S,
+            angle: angles[i],
+          });
+        }
+        requestAnimationFrame(render);
+      }
+      requestAnimationFrame(render);
+    </script>
+  </body>
+</html>
