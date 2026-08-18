@@ -187,6 +187,26 @@ window.XOChicken = (() => {
       };
     }
 
+    if (state === 'wind') {
+      // вітер зносить назад, а він досі перебирає лапами вперед — тіло
+      // відкинуте проти вітру, крило і хвіст майорять
+      const stride = 5.6;
+      const lift = 3.4;
+      const foot = (ph) => ({
+        x: Math.cos(ph) * stride,
+        y: -Math.max(0, -Math.sin(ph)) * lift,
+      });
+      const sw = Math.sin(p);
+      return {
+        lean: -0.42,
+        bob: -Math.abs(Math.sin(p)) * 1.1,
+        feet: [foot(p + Math.PI), foot(p)],
+        wing: { ang: 2.05 + sw * 0.5, len: 13.5, w: 4.6 },
+        puff: 0.1,
+        head: { rot: -0.1 },
+      };
+    }
+
     if (state === 'dive') {
       // pivot: тіло крутиться навколо своєї середини, а не навколо лап —
       // інакше при розвороті головою вниз його зносить убік
@@ -498,7 +518,7 @@ window.XOChicken = (() => {
       ctx.restore();
     };
 
-    upper(() => tail(ctx, state === 'run' ? 1 : 0));
+    upper(() => tail(ctx, state === 'run' || state === 'wind' ? 1 : 0));
     leg(ctx, P.feet[0], C.legsDark);
     const drawWing = (w, fill) =>
       feather(ctx, w.bx ?? 3, w.by ?? -25, w.ang, w.len, w.w, fill);
@@ -524,6 +544,7 @@ window.XOChicken = (() => {
         ctx.translate(0, 30.5);
       }
       head(ctx, tired, beakOpen, blink && !tired, P.dazed);
+      if (o.cosmetic) drawCosmetic(ctx, o.cosmetic);
       ctx.restore();
     });
 
@@ -587,6 +608,102 @@ window.XOChicken = (() => {
   }
 
   /* -------------------------------------------------------------- *
+   *  Косметика: раз на раунд шанс на окуляри чи квітку
+   * -------------------------------------------------------------- */
+
+  function drawCosmetic(ctx, kind) {
+    const cy = -36.5;
+    if (kind === 'shades') {
+      // лінзи трохи більші за самі очі (r 2.6/2.3), але не зливаються між
+      // собою — інакше замість двох лінз виходить суцільна чорна пляма
+      const lensL = { x: 0.2, y: cy - 1.4 };
+      const lensR = { x: 4.2, y: cy - 1.6 };
+      ctx.fillStyle = '#23262c';
+      ctx.strokeStyle = C.line;
+      ctx.lineWidth = LW;
+      for (const e of [lensL, lensR]) {
+        ctx.beginPath();
+        ctx.ellipse(e.x, e.y, 1.8, 1.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(lensL.x + 1.8, lensL.y);
+      ctx.lineTo(lensR.x - 1.8, lensR.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(lensR.x + 1.8, lensR.y);
+      ctx.lineTo(lensR.x + 4, lensR.y - 1.4);
+      ctx.stroke();
+      return;
+    }
+    if (kind === 'flower') {
+      const fx = -4.6;
+      const fy = cy - 9;
+      for (let i = 0; i < 5; i++) {
+        const a = (i * Math.PI * 2) / 5;
+        outlined(
+          ctx,
+          (c) => {
+            c.ellipse(fx + Math.cos(a) * 1.5, fy + Math.sin(a) * 1.5, 1.3, 0.85, a, 0, Math.PI * 2);
+          },
+          '#ffdcec',
+          0.4
+        );
+      }
+      ctx.fillStyle = C.star;
+      ctx.strokeStyle = C.line;
+      ctx.lineWidth = 0.4;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 1.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  /* -------------------------------------------------------------- *
+   *  Дрібні події на лінії
+   * -------------------------------------------------------------- */
+
+  /** Калюжа: пласка пляма на лінії, персонаж хляпає по ній, коли пробігає. */
+  function drawPuddle(ctx, o) {
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#bcdcf2';
+    ctx.strokeStyle = '#8fb9d6';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(o.x, o.y + 2, (o.w || 30) / 2, 3.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  /** Перекотиполе: котиться по лінії незалежно від персонажа. */
+  function drawTumbleweed(ctx, o) {
+    const r = o.r || 10;
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(o.angle || 0);
+    ctx.strokeStyle = '#9c8a5e';
+    ctx.fillStyle = 'rgba(156,138,94,0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    for (let i = 0; i < 5; i++) {
+      const a = (i * Math.PI) / 5;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      ctx.lineTo(-Math.cos(a) * r, -Math.sin(a) * r);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /* -------------------------------------------------------------- *
    *  Перешкода
    * -------------------------------------------------------------- */
 
@@ -624,5 +741,5 @@ window.XOChicken = (() => {
     ctx.restore();
   }
 
-  return { draw, drawHurdle, colors: C };
+  return { draw, drawHurdle, drawPuddle, drawTumbleweed, colors: C };
 })();

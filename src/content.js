@@ -66,6 +66,7 @@
       tripPhase: 'trip', // 'trip' | 'hurt' | 'rise'
       gag: 'pant', // що робить під час відпочинку
       gagT: 0,
+      cosmetic: null, // 'shades' | 'flower' | null, задається на кожен раунд
       sprint: false, // фінальний ривок перед кінцем раунду
       vx: 0,
       vy: 0,
@@ -78,6 +79,13 @@
     hurdlesAt: 0, // коли востаннє перерахували їх висоту
     round: { prev: null, clockEl: null, lookedAt: 0 },
     dust: [],
+    splash: [],
+    puddles: [],
+    nextPuddle: 0,
+    tumbleweeds: [],
+    nextTumble: 0,
+    clouds: [],
+    gust: [],
     lastT: 0,
     status: 'init',
     reason: '',
@@ -150,6 +158,7 @@
     S.src = null;
     S.tip = null;
     S.dust.length = 0;
+    S.clouds.length = 0;
   }
 
   function syncSize() {
@@ -172,6 +181,37 @@
     S.overlay.style.width = ow + 'px';
     S.overlay.style.height = oh + 'px';
     S.line = null;
+    if (!S.clouds.length) initClouds();
+  }
+
+  function initClouds() {
+    S.clouds = [];
+    for (let i = 0; i < 3; i++) {
+      S.clouds.push({
+        x: Math.random() * S.css.w,
+        y: S.css.h * (0.04 + Math.random() * 0.14),
+        r: 14 + Math.random() * 10,
+        speed: 6 + Math.random() * 6,
+      });
+    }
+  }
+
+  function drawClouds(ctx, dt) {
+    for (const c of S.clouds) {
+      c.x -= c.speed * dt;
+      if (c.x < -c.r * 3) c.x = S.css.w + c.r * 3;
+      // Білий на білому фоні графіка (майже завжди такий) невидимий навіть
+      // із товщиною — потрібен колір, що контрастує з фоном, а не сам alpha.
+      ctx.fillStyle = 'rgba(196, 214, 240, 0.6)';
+      ctx.strokeStyle = 'rgba(150, 176, 214, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, c.r, c.r * 0.55, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x - c.r * 0.6, c.y + c.r * 0.12, c.r * 0.62, c.r * 0.4, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x + c.r * 0.65, c.y + c.r * 0.1, c.r * 0.55, c.r * 0.38, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
   }
 
   /* ------------------------------------------------------------------ *
@@ -497,6 +537,71 @@
     ctx.globalAlpha = 1;
   }
 
+  function spawnSplash(x, y) {
+    for (let i = 0; i < 10; i++) {
+      S.splash.push({
+        x,
+        y,
+        vx: (Math.random() - 0.5) * 90,
+        vy: -60 - Math.random() * 60,
+        r: 1 + Math.random() * 1.6,
+        life: 1,
+      });
+    }
+  }
+
+  function drawSplash(ctx, dt) {
+    for (let i = S.splash.length - 1; i >= 0; i--) {
+      const p = S.splash[i];
+      p.life -= dt * 1.7;
+      if (p.life <= 0) {
+        S.splash.splice(i, 1);
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 220 * dt;
+      ctx.globalAlpha = Math.max(0, p.life) * 0.7;
+      ctx.fillStyle = '#5fa8e0';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function spawnGust(x, y) {
+    if (S.gust.length > 50) return;
+    S.gust.push({
+      x: x + 30 + Math.random() * 70,
+      y: y - 34 + Math.random() * 68,
+      len: 12 + Math.random() * 20,
+      vx: -(320 + Math.random() * 240),
+      life: 1,
+    });
+  }
+
+  function drawGust(ctx, dt) {
+    for (let i = S.gust.length - 1; i >= 0; i--) {
+      const g = S.gust[i];
+      g.life -= dt * 1.6;
+      if (g.life <= 0) {
+        S.gust.splice(i, 1);
+        continue;
+      }
+      g.x += g.vx * dt;
+      ctx.globalAlpha = Math.max(0, g.life) * 0.5;
+      ctx.strokeStyle = '#c7cbd6';
+      ctx.lineWidth = 1.4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(g.x, g.y);
+      ctx.lineTo(g.x - g.len, g.y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   /* ------------------------------------------------------------------ *
    *  Поведінка на раунд
    *
@@ -507,9 +612,13 @@
    * ------------------------------------------------------------------ */
 
   const B = {
-    // частки ширини лінії; roamHigh — стеля звичайного циклу, решту лінії
-    // лишаємо під фінальний ривок
-    roamHigh: [0.42, 0.55],
+    // повна рандомізація: після кожного відрізка вибираємо наступну дію за
+    // вагами, тож можливі довгі серії (5 бігів підряд і подібне)
+    actionWeights: { walk: 0.3, run: 0.45, rest: 0.25 },
+
+    // roamHigh — вже не штучна стеля, а майже все вістря; персонаж може
+    // реально дійти до кінця, і саме це ловить вітер нижче
+    roamHigh: [0.9, 0.97],
     roamLow: [0.06, 0.18],
     walkFrac: [0.05, 0.11],
     runFrac: [0.09, 0.18],
@@ -523,6 +632,11 @@
     diveLead: 2, // с до кінця — маємо вже стояти на вістрі
     sprintMax: 900,
     tipMargin: 30,
+
+    // добіг майже до вістря, а раунд ще не закінчується — здуває назад
+    windMargin: 46, // px від вістря, де стартує порив
+    windPxPerSec: [340, 520],
+    windTo: [0.05, 0.2], // куди відносить, частка ширини лінії
 
     hurdleEvery: [11, 22], // с між появами бар'єрів
     maxHurdles: 2,
@@ -546,6 +660,18 @@
   };
 
   const rnd = (r) => r[0] + Math.random() * (r[1] - r[0]);
+
+  /** Випадкова наступна дія за вагами; excludeRest — не одразу після відпочинку. */
+  function pickNextAction(excludeRest) {
+    const opts = excludeRest ? ['walk', 'run'] : ['walk', 'run', 'rest'];
+    const weights = opts.map((o) => B.actionWeights[o]);
+    let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < opts.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return opts[i];
+    }
+    return opts[opts.length - 1];
+  }
 
   /** Скільки секунд лишилось у раунді; null, якщо таймер не знайдено. */
   function roundSecondsLeft(t) {
@@ -574,7 +700,10 @@
     R.groundY = null;
     R.sprint = false;
     R.cycleGain = 0;
+    R.cosmetic = pickCosmetic();
     S.hurdles.length = 0;
+    S.puddles.length = 0;
+    S.tumbleweeds.length = 0;
     R.dir = 1;
     R.x = S.range.x0 + 8 + Math.random() * 40;
     R.y = -PAD * 0.9;
@@ -635,6 +764,22 @@
     R.state = 'dive';
     R.vx = 26 + Math.random() * 26; // майже вертикально, як у воду
     R.vy = -120;
+  }
+
+  function beginWind(R) {
+    R.state = 'wind';
+    R.dir = 1; // все ще «біжить» уперед, просто зносить назад
+    R.speed = rnd(B.windPxPerSec);
+    R.goal = atFrac(rnd(B.windTo));
+    R.cycleGain = 0;
+    // Порив швидший за дрейф доріжки (300-500 проти ~20-60 px/с), тому
+    // персонаж обганяє вже пройдені бар'єри й опиняється перед ними знову —
+    // а вони позначені done і hurdleAhead їх просто ігнорує. Прибираємо все,
+    // як на новому раунді: чесніше, ніж плодити логіку повторного «розблокування».
+    S.hurdles.length = 0;
+    S.puddles.length = 0;
+    S.tumbleweeds.length = 0;
+    for (let i = 0; i < 8; i++) spawnGust(R.x, R.y);
   }
 
   /* ------------------------------------------------------------------ *
@@ -769,6 +914,66 @@
     R.phase = 0;
   }
 
+  /* ------------------------------------------------------------------ *
+   *  Дрібні події на лінії — суто декоративні, стейт-машину не чіпають
+   * ------------------------------------------------------------------ */
+
+  const ATMO = {
+    puddleEvery: [9, 16],
+    puddleW: [26, 46],
+    tumbleEvery: [22, 40],
+    tumbleSpeedExtra: [10, 40],
+  };
+
+  function updatePuddles(dt, t, R, active) {
+    if (active && t > S.nextPuddle) {
+      S.nextPuddle = t + rnd(ATMO.puddleEvery) * 1000;
+      S.puddles.push({ x: S.range.x1 - 6, y: 0, w: rnd(ATMO.puddleW), hit: false });
+    }
+    for (let i = S.puddles.length - 1; i >= 0; i--) {
+      const p = S.puddles[i];
+      p.x -= S.drift.px * dt;
+      const y = yAt(p.x);
+      if (y !== null) p.y = y;
+      if (
+        !p.hit &&
+        (R.state === 'walk' || R.state === 'run') &&
+        Math.abs(R.x - p.x) < p.w * 0.35
+      ) {
+        p.hit = true;
+        spawnSplash(R.x, R.y);
+      }
+      if (p.x < S.range.x0 - 40) S.puddles.splice(i, 1);
+    }
+  }
+
+  function updateTumbleweeds(dt, t, active) {
+    if (active && t > S.nextTumble && S.tumbleweeds.length < 1) {
+      S.nextTumble = t + rnd(ATMO.tumbleEvery) * 1000;
+      S.tumbleweeds.push({ x: S.range.x1 + 20, y: 0, angle: 0, r: 8 + Math.random() * 5 });
+    }
+    for (let i = S.tumbleweeds.length - 1; i >= 0; i--) {
+      const w = S.tumbleweeds[i];
+      const vx = S.drift.px * 1.25 + rnd(ATMO.tumbleSpeedExtra);
+      w.x -= vx * dt;
+      w.angle -= vx * dt / Math.max(4, w.r);
+      const y = yAt(w.x);
+      if (y !== null) w.y = y - w.r * 0.6;
+      if (w.x < S.range.x0 - 60) S.tumbleweeds.splice(i, 1);
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   *  Косметика: раз на раунд шанс на аксесуар
+   * ------------------------------------------------------------------ */
+
+  function pickCosmetic() {
+    const r = Math.random();
+    if (r < 0.12) return 'shades';
+    if (r < 0.24) return 'flower';
+    return null;
+  }
+
   function updateCycle(dt, t) {
     const R = S.runner;
     const left = roundSecondsLeft(t);
@@ -798,8 +1003,11 @@
       beginSprint(R);
     }
 
-    const calmPhase = R.state === 'dive' || R.state === 'gone' || R.state === 'fall';
+    const calmPhase =
+      R.state === 'dive' || R.state === 'gone' || R.state === 'fall' || R.state === 'wind';
     updateHurdles(dt, t, !calmPhase && !R.sprint);
+    updatePuddles(dt, t, R, !calmPhase && !R.sprint);
+    updateTumbleweeds(dt, t, !calmPhase && !R.sprint);
 
     switch (R.state) {
       case 'jump': {
@@ -860,12 +1068,25 @@
       case 'gone':
         break;
 
+      case 'wind': {
+        R.x -= R.speed * dt;
+        if (Math.random() < dt * 16) spawnGust(R.x + 30, R.y);
+        if (R.x <= R.goal) {
+          R.x = R.goal;
+          beginWalk(R);
+        }
+        break;
+      }
+
       case 'rest': {
         R.x -= S.drift.px * dt;
         R.rest -= dt;
         if (t > R.gagT) pickGag(R, t);
         if (tryHurdle(R)) break;
-        if (R.x <= R.restTo || R.rest <= 0) beginWalk(R);
+        if (R.x <= R.restTo || R.rest <= 0) {
+          if (pickNextAction(true) === 'run') beginRun(R);
+          else beginWalk(R);
+        }
         break;
       }
 
@@ -903,11 +1124,22 @@
           break;
         }
 
+        // добіг майже до вістря, а раунд ще не закінчується — дме вітер
+        if (!R.sprint && R.x >= S.range.x1 - B.windMargin) {
+          beginWind(R);
+          break;
+        }
+
         if (R.x >= R.goal) {
           R.x = R.goal;
-          if (R.sprint) beginDive(R);
-          else if (R.state === 'walk') beginRun(R);
-          else beginRest(R);
+          if (R.sprint) {
+            beginDive(R);
+          } else {
+            const next = pickNextAction(false);
+            if (next === 'run') beginRun(R);
+            else if (next === 'walk') beginWalk(R);
+            else beginRest(R);
+          }
         }
         break;
       }
@@ -970,6 +1202,8 @@
     ctx.setTransform(S.dpr, 0, 0, S.dpr, PAD * S.dpr, PAD * S.dpr);
     ctx.clearRect(-PAD, -PAD, S.css.w + PAD * 2, S.css.h + PAD * 2);
     if (!cfg.enabled) return;
+
+    drawClouds(ctx, dt);
 
     if (!S.line && t - S.lineFoundAt > 700) {
       S.lineFoundAt = t;
@@ -1056,12 +1290,22 @@
       R.phase += 20 * dt;
     } else if (R.state === 'trip') {
       R.phase += (R.tripPhase === 'hurt' ? 3 : 14) * dt;
+    } else if (R.state === 'wind') {
+      R.phase += 24 * dt; // біжить на місці, а вітер зносить назад
     } else if (R.state === 'rest') {
       const sp = { peck: 7, look: 1.6, flap: 9, scratch: 8 }[R.gag] || 0;
       R.phase += sp * dt;
     }
 
     drawDust(ctx, dt);
+    drawSplash(ctx, dt);
+    drawGust(ctx, dt);
+    for (const p of S.puddles) {
+      window.XOChicken.drawPuddle(ctx, { x: p.x, y: p.y, w: p.w });
+    }
+    for (const w of S.tumbleweeds) {
+      window.XOChicken.drawTumbleweed(ctx, { x: w.x, y: w.y, angle: w.angle, r: w.r });
+    }
     for (const h of S.hurdles) {
       window.XOChicken.drawHurdle(ctx, {
         x: h.x,
@@ -1088,6 +1332,7 @@
       t: t / 1000,
       scale: cfg.scale,
       angle: R.angle,
+      cosmetic: R.cosmetic,
     });
 
     if (cfg.debug && S.range) {
