@@ -720,9 +720,23 @@ window.XOChicken = (() => {
     return s - Math.floor(s);
   }
 
-  /** Tumbleweed: a tangle of twigs, rolls along the line independently of the character. */
+  /** Tumbleweed: a tangle of twigs, hops and rolls along the line on its own. */
   function drawTumbleweed(ctx, o) {
     const r = o.r || 10;
+    const seed = o.seed || 0;
+    const groundY = o.groundY ?? o.y;
+    const hop = groundY - o.y;
+
+    // contact shadow at ground level — shrinks while airborne mid-hop
+    const shrink = clamp(1 - hop / (r * 2), 0.25, 1);
+    ctx.save();
+    ctx.globalAlpha = 0.18 * shrink;
+    ctx.fillStyle = '#1c1c1c';
+    ctx.beginPath();
+    ctx.ellipse(o.x, groundY + r * 0.5, r * 0.85 * shrink, r * 0.24 * shrink, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.angle || 0);
@@ -733,22 +747,40 @@ window.XOChicken = (() => {
     // Twigs are short segments between random points inside the circle,
     // NOT straight lines through the center — otherwise instead of a
     // tangle you get even spokes, and it reads as a wheat ear or a wheel
-    // rather than a bush.
+    // rather than a bush. Offsetting the hash by a per-instance seed keeps
+    // each tumbleweed's tangle distinct instead of every one being an
+    // identical clone.
     ctx.strokeStyle = '#8a7550';
     ctx.lineWidth = 0.9;
     ctx.lineCap = 'round';
     const N = 12;
     for (let i = 0; i < N; i++) {
-      const a1 = hash01(i * 2 + 1) * Math.PI * 2;
-      const a2 = hash01(i * 2 + 2) * Math.PI * 2;
-      const r1 = r * (0.15 + hash01(i * 3 + 1) * 0.55);
-      const r2 = r * (0.55 + hash01(i * 3 + 2) * 0.45);
+      const a1 = hash01(seed + i * 2 + 1) * Math.PI * 2;
+      const a2 = hash01(seed + i * 2 + 2) * Math.PI * 2;
+      const r1 = r * (0.15 + hash01(seed + i * 3 + 1) * 0.55);
+      const r2 = r * (0.55 + hash01(seed + i * 3 + 2) * 0.45);
       ctx.beginPath();
       ctx.moveTo(Math.cos(a1) * r1, Math.sin(a1) * r1);
       ctx.lineTo(Math.cos(a2) * r2, Math.sin(a2) * r2);
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  /** A little scatter of ground pebbles — pure texture, no interaction. */
+  function drawPebbles(ctx, o) {
+    const seed = o.seed || 0;
+    const n = 2 + Math.floor(hash01(seed) * 2);
+    for (let i = 0; i < n; i++) {
+      const dx = (hash01(seed + i * 5 + 1) - 0.5) * 14;
+      const rr = 0.9 + hash01(seed + i * 5 + 2) * 1.1;
+      outlined(
+        ctx,
+        (c) => c.ellipse(o.x + dx, o.y + 1.5, rr, rr * 0.62, 0, 0, Math.PI * 2),
+        '#b9b2a4',
+        0.4
+      );
+    }
   }
 
   /* -------------------------------------------------------------- *
@@ -796,32 +828,69 @@ window.XOChicken = (() => {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    limb(ctx, [{ x: -6.2, y: 0 }, { x: -3.4, y: -18 }], 1.9, pal.post);
-    limb(ctx, [{ x: 6.2, y: 0 }, { x: 3.4, y: -18 }], 1.9, pal.post);
-    outlined(
-      ctx,
-      (c) => {
-        c.moveTo(-7.4, -19.6);
-        c.lineTo(7.4, -19.6);
-        c.lineTo(7.4, -15.4);
-        c.lineTo(-7.4, -15.4);
-      },
-      pal.bar
-    );
-    // a small pennant on the near post — otherwise a plain bar reads flat
-    outlined(
-      ctx,
-      (c) => {
-        c.moveTo(-7.4, -19.6);
-        c.lineTo(-7.4, -25.6);
-        c.lineTo(-3.2, -22);
-      },
-      pal.flag,
-      0.5
-    );
+    if (o.kind === 'cone') {
+      outlined(ctx, (c) => c.ellipse(0, 0, 7, 1.8, 0, 0, Math.PI * 2), pal.post, 0.4);
+      outlined(
+        ctx,
+        (c) => {
+          c.moveTo(-6.4, 0);
+          c.lineTo(-2.6, -19.6);
+          c.lineTo(2.6, -19.6);
+          c.lineTo(6.4, 0);
+        },
+        pal.bar
+      );
+      // two accent stripes — an unbroken cone silhouette reads flat otherwise
+      outlined(
+        ctx,
+        (c) => {
+          c.moveTo(-3.6, -13.2);
+          c.lineTo(3.6, -13.2);
+          c.lineTo(3.1, -16.2);
+          c.lineTo(-3.1, -16.2);
+        },
+        pal.flag,
+        0.4
+      );
+      outlined(
+        ctx,
+        (c) => {
+          c.moveTo(-4.9, -6);
+          c.lineTo(4.9, -6);
+          c.lineTo(4.2, -9.4);
+          c.lineTo(-4.2, -9.4);
+        },
+        pal.flag,
+        0.4
+      );
+    } else {
+      limb(ctx, [{ x: -6.2, y: 0 }, { x: -3.4, y: -18 }], 1.9, pal.post);
+      limb(ctx, [{ x: 6.2, y: 0 }, { x: 3.4, y: -18 }], 1.9, pal.post);
+      outlined(
+        ctx,
+        (c) => {
+          c.moveTo(-7.4, -19.6);
+          c.lineTo(7.4, -19.6);
+          c.lineTo(7.4, -15.4);
+          c.lineTo(-7.4, -15.4);
+        },
+        pal.bar
+      );
+      // a small pennant on the near post — otherwise a plain bar reads flat
+      outlined(
+        ctx,
+        (c) => {
+          c.moveTo(-7.4, -19.6);
+          c.lineTo(-7.4, -25.6);
+          c.lineTo(-3.2, -22);
+        },
+        pal.flag,
+        0.5
+      );
+    }
     ctx.globalAlpha = 1;
     ctx.restore();
   }
 
-  return { draw, drawHurdle, drawPuddle, drawTumbleweed, drawShadow, colors: C };
+  return { draw, drawHurdle, drawPuddle, drawTumbleweed, drawPebbles, drawShadow, colors: C };
 })();

@@ -85,7 +85,11 @@
     nextPuddle: 0,
     tumbleweeds: [],
     nextTumble: 0,
+    pebbles: [],
+    nextPebble: 0,
     clouds: [],
+    birds: [],
+    nextBird: 0,
     gust: [],
     lastT: 0,
     status: 'init',
@@ -194,6 +198,44 @@
         r: 14 + Math.random() * 10,
         speed: 6 + Math.random() * 6,
       });
+    }
+  }
+
+  const BIRD = { every: [14, 30], speed: [40, 70] };
+
+  function updateBirds(dt, t) {
+    if (t > S.nextBird && S.birds.length < 2) {
+      S.nextBird = t + rnd(BIRD.every) * 1000;
+      S.birds.push({
+        x: S.css.w + 20,
+        y: S.css.h * (0.08 + Math.random() * 0.18),
+        speed: rnd(BIRD.speed),
+        phase: Math.random() * Math.PI * 2,
+        r: 3 + Math.random() * 1.5,
+      });
+    }
+    for (let i = S.birds.length - 1; i >= 0; i--) {
+      const b = S.birds[i];
+      b.x -= b.speed * dt;
+      b.phase += dt * 9;
+      if (b.x < -20) S.birds.splice(i, 1);
+    }
+  }
+
+  function drawBirds(ctx) {
+    for (const b of S.birds) {
+      // fade near the right spawn edge and the left despawn edge, same idea as clouds
+      const fade = clamp(Math.min((S.css.w - b.x) / CLOUD_FADE, (b.x + 20) / CLOUD_FADE), 0, 1);
+      if (fade <= 0) continue;
+      const flap = Math.sin(b.phase) * 0.6;
+      ctx.strokeStyle = `rgba(90, 100, 120, ${(0.5 * fade).toFixed(3)})`;
+      ctx.lineWidth = 1.1;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(b.x - b.r * 2, b.y - flap * b.r);
+      ctx.quadraticCurveTo(b.x - b.r * 0.6, b.y + b.r * 0.6, b.x, b.y);
+      ctx.quadraticCurveTo(b.x + b.r * 0.6, b.y + b.r * 0.6, b.x + b.r * 2, b.y - flap * b.r);
+      ctx.stroke();
     }
   }
 
@@ -717,6 +759,7 @@
     S.hurdles.length = 0;
     S.puddles.length = 0;
     S.tumbleweeds.length = 0;
+    S.pebbles.length = 0;
     R.dir = 1;
     R.x = S.range.x0 + 8 + Math.random() * 40;
     R.y = -PAD * 0.9;
@@ -828,6 +871,7 @@
             alpha: 1,
             done: false,
             tint: Math.random(),
+            kind: Math.random() < 0.4 ? 'cone' : 'fence',
           });
         }
       }
@@ -958,6 +1002,7 @@
     puddleEvery: [9, 16],
     puddleW: [26, 46],
     tumbleEvery: [22, 40],
+    pebbleEvery: [4, 8],
   };
 
   function updatePuddles(dt, t, R, active) {
@@ -987,14 +1032,40 @@
     }
   }
 
+  // Small rocks dotting the ground — pure ground texture, no collision,
+  // no gap-spacing against other objects since they're too small to
+  // visually clash with anything.
+  function updatePebbles(dt, t, active) {
+    if (active && t > S.nextPebble && S.pebbles.length < 10) {
+      S.nextPebble = t + rnd(ATMO.pebbleEvery) * 1000;
+      S.pebbles.push({ x: S.range.x1 - 6, y: 0, seed: Math.random() * 100 });
+    }
+    for (let i = S.pebbles.length - 1; i >= 0; i--) {
+      const p = S.pebbles[i];
+      p.x -= S.drift.px * dt;
+      const y = yAt(p.x);
+      if (y !== null) p.y = y;
+      if (p.x < S.range.x0 - 40) S.pebbles.splice(i, 1);
+    }
+  }
+
   function updateTumbleweeds(dt, t, active) {
-    if (active && t > S.nextTumble && S.tumbleweeds.length < 1) {
+    if (active && t > S.nextTumble && S.tumbleweeds.length < 2) {
       const x = S.range.x1 + 20;
       if (!spawnClear(x)) {
         S.nextTumble = t + 600;
       } else {
         S.nextTumble = t + rnd(ATMO.tumbleEvery) * 1000;
-        S.tumbleweeds.push({ x, y: 0, angle: 0, r: 8 + Math.random() * 5 });
+        S.tumbleweeds.push({
+          x,
+          y: 0,
+          groundY: 0,
+          angle: 0,
+          r: 8 + Math.random() * 5,
+          seed: Math.random() * 100,
+          hop: 0,
+          lastHop: 0,
+        });
       }
     }
     for (let i = S.tumbleweeds.length - 1; i >= 0; i--) {
@@ -1004,9 +1075,17 @@
       // this, since it only checks the moment of spawning, not later
       // movement).
       w.x -= S.drift.px * dt;
-      w.angle -= S.drift.px * dt / Math.max(4, w.r);
+      w.angle -= (S.drift.px * dt) / Math.max(4, w.r);
       const y = yAt(w.x);
-      if (y !== null) w.y = y - w.r * 0.6;
+      if (y !== null) w.groundY = y - w.r * 0.6;
+      // bounce tied to rotation (not a separate timer) so it reads as
+      // hopping once per roll instead of drifting out of sync with the spin
+      w.hop = Math.max(0, Math.sin(w.angle)) * w.r * 0.55;
+      if (w.lastHop > w.r * 0.2 && w.hop <= w.r * 0.05) {
+        spawnDust(w.x, w.groundY, 1);
+      }
+      w.lastHop = w.hop;
+      w.y = w.groundY - w.hop;
       if (w.x < S.range.x0 - 60) S.tumbleweeds.splice(i, 1);
     }
   }
@@ -1056,6 +1135,7 @@
     updateHurdles(dt, t, !calmPhase && !R.sprint);
     updatePuddles(dt, t, R, !calmPhase && !R.sprint);
     updateTumbleweeds(dt, t, !calmPhase && !R.sprint);
+    updatePebbles(dt, t, !calmPhase && !R.sprint);
 
     switch (R.state) {
       case 'jump': {
@@ -1262,6 +1342,8 @@
     if (!cfg.enabled) return;
 
     drawClouds(ctx, dt);
+    updateBirds(dt, t);
+    drawBirds(ctx);
 
     if (!S.line && t - S.lineFoundAt > 700) {
       S.lineFoundAt = t;
@@ -1361,8 +1443,18 @@
     for (const p of S.puddles) {
       window.XOChicken.drawPuddle(ctx, { x: p.x, y: p.y, w: p.w });
     }
+    for (const p of S.pebbles) {
+      window.XOChicken.drawPebbles(ctx, { x: p.x, y: p.y, seed: p.seed });
+    }
     for (const w of S.tumbleweeds) {
-      window.XOChicken.drawTumbleweed(ctx, { x: w.x, y: w.y, angle: w.angle, r: w.r });
+      window.XOChicken.drawTumbleweed(ctx, {
+        x: w.x,
+        y: w.y,
+        groundY: w.groundY,
+        angle: w.angle,
+        r: w.r,
+        seed: w.seed,
+      });
     }
     for (const h of S.hurdles) {
       window.XOChicken.drawHurdle(ctx, {
@@ -1373,6 +1465,7 @@
         alpha: h.alpha,
         scale: cfg.scale,
         tint: h.tint,
+        kind: h.kind,
       });
     }
     if (R.state === 'gone') return;
