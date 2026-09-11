@@ -2,6 +2,24 @@
 
 ## Наступний реліз
 
+- Extension translated to English: manifest, popup, all in-extension status
+  messages, and every code comment in src/.
+- New icon: a purpose-built flat mark (colored badge + bold head silhouette)
+  instead of a scaled-down detailed illustration — the old one turned to
+  mud below ~32px.
+- Sunglasses redesigned: added a lighter rim (was the same near-black as the
+  lens fill, so the frame disappeared into it) and a glass highlight —
+  before this they just read as plain black eyes.
+
+- Хмари: прибрав обводку — вона обводила кожне кільце окремо і давало видимі
+  шви там, де кола накладаються.
+- Перекотиполе: замість симетричних спиць (читалось як колосок/колесо) —
+  хаотичний клубок гілочок.
+- Бар'єр, калюжа і перекотиполе більше не спавняться один у одному: перед
+  появою кожен перевіряє всі три масиви, а перекотиполе рухається зі
+  швидкістю доріжки, а не швидше — інакше наздоганяло вже розставлені
+  об'єкти вже після чистого спавну.
+
 - Дрібні події на лінії: калюжі з бризками, перекотиполе.
 - Косметична рандомізація: раз на раунд шанс на сонячні окуляри чи квітку.
 - Фонові хмари — ледь помітна атмосфера, не заважає читати графік.

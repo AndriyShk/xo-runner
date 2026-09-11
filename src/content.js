@@ -1,6 +1,7 @@
 /*
- * XO Pulse Runner — малює персонажа поверх лінії графіка на xo.market/pulse.
- * Читає пікселі canvas графіка, нічого на сторінці не змінює.
+ * XO Pulse Runner — draws a character running along the live chart line
+ * on xo.market/pulse. Reads the chart canvas pixels; changes nothing else
+ * on the page.
  */
 (() => {
   'use strict';
@@ -22,61 +23,61 @@
   let cfg = { ...DEFAULTS };
 
   const S = {
-    src: null, // canvas графіка
-    scratch: null, // власний буфер, куди копіюємо смуги для читання
+    src: null, // the chart's canvas
+    scratch: null, // our own buffer we copy strips into for reading
     sctx: null,
     overlay: null,
     octx: null,
     ro: null,
     raf: 0,
-    k: 1, // backing-пікселів на 1 css-піксель у canvas графіка
+    k: 1, // backing pixels per css pixel in the chart canvas
     css: { w: 0, h: 0 },
     dpr: 1,
-    line: null, // {r,g,b} — колір лінії
+    line: null, // {r,g,b} — line color
     lineFoundAt: 0,
     lastScan: 0,
     lastRangeScan: 0,
-    range: null, // {x0, x1} — межі лінії по X, css
+    range: null, // {x0, x1} — line bounds along X, css px
     tip: null, // {x, y} css
     slope: 0,
     runner: {
       alive: false,
-      pct: 50, // позиція вздовж лінії, %
+      pct: 50, // position along the line, %
       x: 0,
       y: 0,
-      dir: 1, // 1 — дивиться праворуч, -1 — ліворуч
+      dir: 1, // 1 — facing right, -1 — facing left
       state: 'run', // 'run' | 'walk' | 'rest'
-      target: 90, // куди прямує, %
-      rest: 0, // скільки ще відпочивати, сек
-      baseSpeed: 70, // px/сек до множника темпу
+      target: 90, // where it's heading, %
+      rest: 0, // how much longer to rest, sec
+      baseSpeed: 70, // px/sec before the speed multiplier
       speed: 70,
-      goal: 0, // до якого X іде цей відрізок
-      restTo: 0, // до якого X має віднести доріжка на відпочинку
-      cycleGain: 0, // скільки набув уперед від минулого відпочинку
-      resume: 'walk', // куди повернутись після стрибка
-      jumpOff: 0, // висота над лінією під час стрибка
+      goal: 0, // the X this leg is heading to
+      restTo: 0, // the X the treadmill should carry it back to while resting
+      cycleGain: 0, // ground gained forward since the last rest
+      resume: 'walk', // state to return to after a jump
+      jumpOff: 0, // height above the line during a jump
       jumpV: 0,
       jumpG: 1400,
-      jumpVx: 0, // горизонтальна швидкість у стрибку
-      groundY: null, // згладжена висота землі під лапами
-      vFall: 0, // швидкість падіння, коли земля пішла з-під ніг
-      hopAt: 0, // не стрибати через стінку частіше, ніж раз на hopCooldown
-      tripT: 0, // скільки ще лежати
+      jumpVx: 0, // horizontal speed during a jump
+      groundY: null, // smoothed ground height under the feet
+      vFall: 0, // fall speed when the ground drops away underfoot
+      hopAt: 0, // don't hop a wall more often than once per hopCooldown
+      tripT: 0, // how much longer to lie there
       tripTotal: 0,
       tripPhase: 'trip', // 'trip' | 'hurt' | 'rise'
-      gag: 'pant', // що робить під час відпочинку
+      gag: 'pant', // what it's doing while resting
       gagT: 0,
-      cosmetic: null, // 'shades' | 'flower' | null, задається на кожен раунд
-      sprint: false, // фінальний ривок перед кінцем раунду
+      cosmetic: null, // 'shades' | 'flower' | null, rolled fresh each round
+      sprint: false, // final dash before the round ends
       vx: 0,
       vy: 0,
       phase: 0,
       angle: 0,
     },
-    drift: { px: 20, prof: null, at: 0 }, // швидкість прокрутки графіка, px/сек
+    drift: { px: 20, prof: null, at: 0 }, // chart scroll speed, px/sec
     hurdles: [], // {x, y, knock, done}
-    nextHurdle: 0, // коли з'явиться наступна
-    hurdlesAt: 0, // коли востаннє перерахували їх висоту
+    nextHurdle: 0, // when the next one appears
+    hurdlesAt: 0, // last time their height was recalculated
     round: { prev: null, clockEl: null, lookedAt: 0 },
     dust: [],
     splash: [],
@@ -91,13 +92,13 @@
     reason: '',
   };
 
-  const PAD = 64; // запас навколо графіка, щоб персонаж не обрізався об край
+  const PAD = 64; // margin around the chart so the character isn't clipped at the edge
 
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const lerp = (a, b, t) => a + (b - a) * t;
 
   /* ------------------------------------------------------------------ *
-   *  Пошук canvas графіка
+   *  Finding the chart canvas
    * ------------------------------------------------------------------ */
 
   function findChartCanvas() {
@@ -169,7 +170,7 @@
     S.dpr = window.devicePixelRatio || 1;
     S.k = r.width > 0 ? S.src.width / r.width : 1;
 
-    // оверлей більший за графік на PAD з кожного боку, щоб персонажа не обрізало
+    // overlay is bigger than the chart by PAD on each side, so the character isn't clipped
     const ow = r.width + PAD * 2;
     const oh = r.height + PAD * 2;
     const bw = Math.max(1, Math.round(ow * S.dpr));
@@ -196,31 +197,40 @@
     }
   }
 
+  const CLOUD_FADE = 46; // css px near each edge over which clouds fade instead of popping
+
   function drawClouds(ctx, dt) {
     for (const c of S.clouds) {
       c.x -= c.speed * dt;
       if (c.x < -c.r * 3) c.x = S.css.w + c.r * 3;
-      // Білий на білому фоні графіка (майже завжди такий) невидимий навіть
-      // із товщиною — потрібен колір, що контрастує з фоном, а не сам alpha.
-      ctx.fillStyle = 'rgba(196, 214, 240, 0.6)';
-      ctx.strokeStyle = 'rgba(150, 176, 214, 0.35)';
-      ctx.lineWidth = 1;
+      // fade in from the right, fade out on the left — softens the wrap
+      // and the hard edge of the visible chart area
+      const edge = Math.min(c.x / CLOUD_FADE, (S.css.w - c.x) / CLOUD_FADE);
+      const fade = clamp(edge, 0, 1);
+      if (fade <= 0) continue;
+      // White is invisible against the chart's usually-white background —
+      // needs a color with contrast. NO stroke: an outline traces each
+      // circle on its own, so where they overlap you'd see seams between
+      // the "blobs" instead of one soft cloud. Only the fill of several
+      // overlapping ellipses gives the soft shape.
+      ctx.fillStyle = `rgba(196, 214, 240, ${(0.55 * fade).toFixed(3)})`;
       ctx.beginPath();
       ctx.ellipse(c.x, c.y, c.r, c.r * 0.55, 0, 0, Math.PI * 2);
-      ctx.ellipse(c.x - c.r * 0.6, c.y + c.r * 0.12, c.r * 0.62, c.r * 0.4, 0, 0, Math.PI * 2);
-      ctx.ellipse(c.x + c.r * 0.65, c.y + c.r * 0.1, c.r * 0.55, c.r * 0.38, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x - c.r * 0.62, c.y + c.r * 0.14, c.r * 0.6, c.r * 0.4, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x + c.r * 0.6, c.y + c.r * 0.16, c.r * 0.56, c.r * 0.38, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x + c.r * 0.05, c.y - c.r * 0.28, c.r * 0.5, c.r * 0.34, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.stroke();
     }
   }
 
   /* ------------------------------------------------------------------ *
-   *  Читання пікселів
+   *  Reading pixels
    * ------------------------------------------------------------------ */
 
-  // Копіюємо смугу чужого canvas у свій буфер, а не читаємо напряму: перший
-  // getContext() на чужому canvas фіксує його тип, і якщо бібліотека графіка
-  // згодом попросить WebGL — отримає null. drawImage такого обмеження не має.
+  // We copy a strip of the other canvas into our own buffer instead of
+  // reading it directly: the first getContext() call on someone else's
+  // canvas locks in its type, so if the chart library later asks for
+  // WebGL it would get null. drawImage has no such restriction.
   function readWindow(cssX, cssW) {
     if (!S.src || !S.src.width || !S.src.height) return null;
     const sx = clamp(Math.floor(cssX * S.k), 0, S.src.width - 1);
@@ -243,7 +253,7 @@
       img = S.sctx.getImageData(0, 0, sw, h);
     } catch (e) {
       S.status = 'error';
-      S.reason = 'не вдається прочитати canvas графіка: ' + e.message;
+      S.reason = "can't read the chart canvas: " + e.message;
       return null;
     }
     return { d: img.data, w: sw, h, sx };
@@ -259,7 +269,7 @@
     return dr * dr + dg * dg + db * db < MATCH_TOL2;
   }
 
-  /** Y лінії в конкретній колонці вікна (backing-координати) або null. */
+  /** Line Y in a given window column (backing coords), or null. */
   function yInColumn(win, col, color) {
     const { d, w, h } = win;
     let best = -1;
@@ -284,13 +294,13 @@
       bestLen = run;
       best = sum / run;
     }
-    // товста «стіна» пікселів — це заливка під лінією, а не сама лінія
+    // a thick 'wall' of pixels is the fill under the line, not the line itself
     if (bestLen === 0 || bestLen > 14 * S.k) return null;
     return best;
   }
 
   /* ------------------------------------------------------------------ *
-   *  Автовизначення кольору лінії
+   *  Auto-detecting the line color
    * ------------------------------------------------------------------ */
 
   function detectLineColor() {
@@ -316,8 +326,8 @@
         const b = d[i + 2];
         const mx = Math.max(r, g, b);
         const mn = Math.min(r, g, b);
-        if (mx < 45) continue; // осі й підписи
-        if ((mx - mn) / mx < 0.3) continue; // сіре/біле
+        if (mx < 45) continue; // axes and labels
+        if ((mx - mn) / mx < 0.3) continue; // gray/white
         const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
         counts.set(key, (counts.get(key) || 0) + 1);
       }
@@ -333,7 +343,7 @@
         b: ((key & 31) << 3) + 4,
       }));
 
-    // лінія — тонка (кілька пікселів у колонці) і тягнеться по X
+    // the line is thin (a few pixels per column) and stretches along X
     let best = null;
     let bestScore = 0;
     for (const c of cands) {
@@ -358,12 +368,13 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  Пошук вістря лінії та нахилу
+   *  Finding the line's tip and slope
    * ------------------------------------------------------------------ */
 
-  // Праворуч від кінця лінії сайт малює підпис ціни тим самим кольором, тому
-  // беремо найдовший суцільний сегмент, а не крайні пікселі кольору.
-  const MAX_GAP = 4; // css-пікселів розриву, який ще вважаємо тією ж лінією
+  // The site draws the price label in the same color right past the end of
+  // the line, so we take the longest unbroken segment instead of the
+  // outermost pixels of that color.
+  const MAX_GAP = 4; // css-pixel gap still counted as the same line
 
   function scanRange() {
     const win = readWindow(0, S.css.w);
@@ -390,14 +401,15 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  Швидкість «бігової доріжки»
+   *  "Treadmill" speed
    * ------------------------------------------------------------------ */
 
-  // Вістря лінії прибите до фіксованого X, земля під ним їде вліво. Швидкість
-  // прокрутки міряємо самі: знімаємо профіль висот лінії й шукаємо, на скільки
-  // він з'їхав відтоді (взаємна кореляція).
-  const PROF_STEP = 4; // css-пікселів між замірами
-  const PROF_SPAN = 320; // ширина ділянки зліва від вістря
+  // The line's tip is pinned to a fixed X while the ground underneath
+  // scrolls left. We measure that scroll speed ourselves: take a height
+  // profile of the line and find how far it shifted since last time
+  // (cross-correlation).
+  const PROF_STEP = 4; // css pixels between samples
+  const PROF_SPAN = 320; // width of the sampled stretch left of the tip
 
   function lineProfile(win, x1) {
     const n = Math.floor(PROF_SPAN / PROF_STEP);
@@ -410,7 +422,7 @@
     return p;
   }
 
-  /** Середньоквадратична розбіжність профілів при зсуві на j кроків. */
+  /** Mean squared difference between profiles at a shift of j steps. */
   function errAt(now, before, j) {
     if (j < 0 || j >= before.length) return Infinity;
     let err = 0;
@@ -438,7 +450,7 @@
     const dt = (now - D.at) / 1000;
     if (dt < 1.2) return;
 
-    // те, що зараз у точці i, раніше було правіше — у точці i + j
+    // what's at point i now was further right before — at point i + j
     let bestJ = -1;
     let bestErr = Infinity;
     const n = prof.length;
@@ -451,8 +463,8 @@
       }
     }
     if (bestJ >= 0) {
-      // параболічне уточнення між сусідніми зсувами, щоб крок 4px не давав
-      // помітної сходинки у вимірі
+      // parabolic refinement between neighboring shifts, so the 4px step
+      // doesn't show up as a visible stair-step in the measurement
       const e = (j) => errAt(prof, D.prof, j);
       const e0 = e(bestJ - 1);
       const e2 = e(bestJ + 1);
@@ -468,7 +480,7 @@
     D.at = now;
   }
 
-  /** Y лінії в довільному X (css) — читає вузьку смужку. */
+  /** Line Y at an arbitrary X (css) — reads a narrow strip. */
   function yAt(cssX, cachedWin) {
     if (!S.line) return null;
     let win = cachedWin;
@@ -502,7 +514,7 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  Пилюка з-під лап
+   *  Dust kicked up from the feet
    * ------------------------------------------------------------------ */
 
   function spawnDust(x, y, dir) {
@@ -603,53 +615,54 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  Поведінка на раунд
+   *  Round behavior
    *
-   *  Раунд 5 хв: падіння з неба на старті → цикл «йде → біжить → відпочиває»
-   *  → за 10с до кінця ривок до вістря і стрибок щучкою. Земля весь час їде
-   *  вліво (measureDrift), тому це бігова доріжка: на відпочинку персонажа
-   *  зносить назад.
+   *  A round is 5 min: falls from the sky at the start → cycles through
+   *  "walk → run → rest" → 10s before the end, dashes to the tip and dives.
+   *  The ground keeps scrolling left (measureDrift), so it's a treadmill:
+   *  resting drifts the character back.
    * ------------------------------------------------------------------ */
 
   const B = {
-    // повна рандомізація: після кожного відрізка вибираємо наступну дію за
-    // вагами, тож можливі довгі серії (5 бігів підряд і подібне)
+    // full randomization: after each leg we pick the next action by
+    // weight, so long streaks are possible (5 runs in a row and the like)
     actionWeights: { walk: 0.3, run: 0.45, rest: 0.25 },
 
-    // roamHigh — вже не штучна стеля, а майже все вістря; персонаж може
-    // реально дійти до кінця, і саме це ловить вітер нижче
+    // roamHigh is no longer an artificial ceiling but nearly the whole
+    // line; the character can genuinely reach the end, and that's exactly
+    // what the wind below catches
     roamHigh: [0.9, 0.97],
     roamLow: [0.06, 0.18],
     walkFrac: [0.05, 0.11],
     runFrac: [0.09, 0.18],
-    // чистий приріст на екрані, вже без прокрутки
+    // pure on-screen gain, already net of scrolling
     walkPxPerSec: [22, 40],
     runPxPerSec: [70, 130],
-    restBack: [0.9, 1.35], // частка набутого, яку віддаємо доріжці на відпочинку
+    restBack: [0.9, 1.35], // fraction of the gain given back to the treadmill while resting
     restMaxSec: 16,
-    calmBefore: 12, // с до кінця — перестаємо просуватись уперед
-    sprintAt: 10, // с до кінця — фінальний ривок
-    diveLead: 2, // с до кінця — маємо вже стояти на вістрі
+    calmBefore: 12, // sec before the end — stop moving forward
+    sprintAt: 10, // sec before the end — final dash
+    diveLead: 2, // sec before the end — should already be at the tip
     sprintMax: 900,
     tipMargin: 30,
 
-    // добіг майже до вістря, а раунд ще не закінчується — здуває назад
-    windMargin: 46, // px від вістря, де стартує порив
+    // reached almost the tip while the round isn't over yet — blows it back
+    windMargin: 46, // px from the tip where the gust starts
     windPxPerSec: [340, 520],
-    windTo: [0.05, 0.2], // куди відносить, частка ширини лінії
+    windTo: [0.05, 0.2], // where it carries the character to, fraction of line width
 
-    hurdleEvery: [11, 22], // с між появами бар'єрів
+    hurdleEvery: [11, 22], // sec between hurdle spawns
     maxHurdles: 2,
     tripChance: 0.18,
 
-    // одиниці персонажа (зріст = 50), не пікселі — щоб масштаб не ламав стрибок
+    // character units (height = 50), not pixels — so scale doesn't break the jump
     jumpApex: 30,
     jumpG: 1400,
     jumpMinVx: 105,
     jumpJitter: [0.92, 1.1],
 
-    stepClimb: 150, // видряпування на різкий рух ціни, од/сек
-    stepHop: 22, // вище — стрибок замість видряпування
+    stepClimb: 150, // climbing a sharp price move, units/sec
+    stepHop: 22, // above this, hop instead of climbing
     hopCooldown: 700,
     stepMaxApex: 62,
     stepLook: 14,
@@ -661,7 +674,7 @@
 
   const rnd = (r) => r[0] + Math.random() * (r[1] - r[0]);
 
-  /** Випадкова наступна дія за вагами; excludeRest — не одразу після відпочинку. */
+  /** Random next action by weight; excludeRest — not right after resting. */
   function pickNextAction(excludeRest) {
     const opts = excludeRest ? ['walk', 'run'] : ['walk', 'run', 'rest'];
     const weights = opts.map((o) => B.actionWeights[o]);
@@ -673,7 +686,7 @@
     return opts[opts.length - 1];
   }
 
-  /** Скільки секунд лишилось у раунді; null, якщо таймер не знайдено. */
+  /** Seconds left in the round; null if the timer wasn't found. */
   function roundSecondsLeft(t) {
     const R = S.round;
     if (!R.clockEl || !R.clockEl.isConnected) {
@@ -712,16 +725,16 @@
     R.alive = true;
   }
 
-  const MIN_LEG = 25; // менше — не рушаємо, одразу відпочинок
+  const MIN_LEG = 25; // less than this — don't bother, rest right away
 
   const span = () => Math.max(1, S.range.x1 - S.range.x0);
   const atFrac = (f) => S.range.x0 + span() * f;
 
-  /** Спільний старт відрізка вперед. Якщо йти нікуди — переходить у відпочинок. */
+  /** Shared start of a forward leg. Rests instead if there's nowhere to go. */
   function beginLeg(R, state, frac, speed) {
     const ceiling = Math.min(atFrac(rnd(B.roamHigh)), S.range.x1 - B.tipMargin);
     const goal = Math.min(R.x + span() * rnd(frac), ceiling);
-    // перед кінцем раунду вперед не лізем — лишаємо місце на ривок
+    // don't push forward near the end of the round — leave room for the dash
     const calm = S.round.prev !== null && S.round.prev <= B.calmBefore;
     if (calm || goal - R.x < MIN_LEG) {
       beginRest(R);
@@ -746,7 +759,7 @@
     R.dir = 1;
     R.gag = 'pant';
     R.gagT = performance.now() + rnd(B.gagEvery) * 1000;
-    // відпочиваємо, поки доріжка не відвезе назад набуте — самобалансний цикл
+    // rest until the treadmill carries back what was just gained — a self-balancing cycle
     R.restTo = Math.max(R.x - R.cycleGain * rnd(B.restBack), atFrac(rnd(B.roamLow)));
     R.cycleGain = 0;
     R.rest = B.restMaxSec;
@@ -757,25 +770,26 @@
     R.sprint = true;
     R.dir = 1;
     R.goal = S.range.x1;
-    R.baseSpeed = 200; // перерахується щокадру
+    R.baseSpeed = 200; // recomputed every frame
   }
 
   function beginDive(R) {
     R.state = 'dive';
-    R.vx = 26 + Math.random() * 26; // майже вертикально, як у воду
+    R.vx = 26 + Math.random() * 26; // nearly vertical, like diving into water
     R.vy = -120;
   }
 
   function beginWind(R) {
     R.state = 'wind';
-    R.dir = 1; // все ще «біжить» уперед, просто зносить назад
+    R.dir = 1; // still 'running' forward, just being carried back
     R.speed = rnd(B.windPxPerSec);
     R.goal = atFrac(rnd(B.windTo));
     R.cycleGain = 0;
-    // Порив швидший за дрейф доріжки (300-500 проти ~20-60 px/с), тому
-    // персонаж обганяє вже пройдені бар'єри й опиняється перед ними знову —
-    // а вони позначені done і hurdleAhead їх просто ігнорує. Прибираємо все,
-    // як на новому раунді: чесніше, ніж плодити логіку повторного «розблокування».
+    // The gust is faster than the treadmill drift (300-500 vs ~20-60 px/s),
+    // so the character overtakes hurdles it already cleared and ends up in
+    // front of them again — but they're marked done, and hurdleAhead just
+    // ignores them. Clearing everything, same as a new round, is more
+    // honest than adding logic to "re-unlock" them.
     S.hurdles.length = 0;
     S.puddles.length = 0;
     S.tumbleweeds.length = 0;
@@ -783,17 +797,39 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  Перешкоди
+   *  Hurdles
    * ------------------------------------------------------------------ */
+
+  // Make sure no two of {hurdle, puddle, tumbleweed} ever land on the same
+  // spot: check all three arrays before every spawn, not just your own.
+  const SPAWN_GAP = 70;
+
+  function spawnClear(x) {
+    for (const h of S.hurdles) if (Math.abs(h.x - x) < SPAWN_GAP) return false;
+    for (const p of S.puddles) if (Math.abs(p.x - x) < SPAWN_GAP) return false;
+    for (const w of S.tumbleweeds) if (Math.abs(w.x - x) < SPAWN_GAP) return false;
+    return true;
+  }
 
   function updateHurdles(dt, t, active) {
     if (active && t > S.nextHurdle) {
-      S.nextHurdle = t + rnd(B.hurdleEvery) * 1000;
-      if (S.hurdles.length < B.maxHurdles) {
-        S.hurdles.push({
-          x: S.range.x1 - 6, y: 0, angle: 0,
-          knock: 0, lie: 0, alpha: 1, done: false,
-        });
+      const x = S.range.x1 - 6;
+      if (!spawnClear(x)) {
+        S.nextHurdle = t + 600; // spot's taken — try again shortly
+      } else {
+        S.nextHurdle = t + rnd(B.hurdleEvery) * 1000;
+        if (S.hurdles.length < B.maxHurdles) {
+          S.hurdles.push({
+            x,
+            y: 0,
+            angle: 0,
+            knock: 0,
+            lie: 0,
+            alpha: 1,
+            done: false,
+            tint: Math.random(),
+          });
+        }
       }
     }
     const resample = t - S.hurdlesAt > 100;
@@ -825,7 +861,7 @@
     }
   }
 
-  /** Найближчий бар'єр попереду; null, якщо таких немає. */
+  /** Nearest hurdle ahead; null if there is none. */
   function hurdleAhead(R) {
     let best = null;
     for (const h of S.hurdles) {
@@ -837,12 +873,12 @@
     return best;
   }
 
-  /** Скільки пікселів в одній одиниці персонажа за поточного масштабу. */
+  /** Pixels per character unit at the current scale. */
   const unitPx = () => 0.78 * (cfg.scale || 1);
 
-  // Дистанція відштовхування залежить від швидкості зближення (на ходьбі
-  // ~45px/с, у ривку до 540), тому рахуємо так, щоб верхівка дуги припала
-  // рівно на бар'єр — а не беремо сталу відстань.
+  // The takeoff distance depends on the closing speed (~45px/s walking,
+  // up to 540 during the dash), so we compute it so the top of the arc
+  // lands right on the hurdle — instead of using a fixed distance.
   function jumpPlan(R, needPx) {
     const u = unitPx();
     const g = B.jumpG * u;
@@ -857,7 +893,7 @@
     return { v, g, vx, at: (vx + S.drift.px) * T * 0.5 };
   }
 
-  /** Наскільки різко лінія йде вгору просто перед персонажем, у пікселях. */
+  /** How sharply the line rises right in front of the character, in pixels. */
   function wallAhead(R) {
     if (R.groundY === null) return 0;
     const g1 = yAt(R.x + B.stepLook);
@@ -885,7 +921,7 @@
     for (let i = 0; i < 5; i++) spawnDust(R.x + 4, R.y, 1);
   }
 
-  /** Бар'єр попереду: стрибок або падіння. true — стан змінився. */
+  /** Hurdle ahead: jump or fall. true — the state changed. */
   function tryHurdle(R) {
     const ahead = hurdleAhead(R);
     if (!ahead) return false;
@@ -915,20 +951,24 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  Дрібні події на лінії — суто декоративні, стейт-машину не чіпають
+   *  Small line events — purely decorative, don't touch the state machine
    * ------------------------------------------------------------------ */
 
   const ATMO = {
     puddleEvery: [9, 16],
     puddleW: [26, 46],
     tumbleEvery: [22, 40],
-    tumbleSpeedExtra: [10, 40],
   };
 
   function updatePuddles(dt, t, R, active) {
     if (active && t > S.nextPuddle) {
-      S.nextPuddle = t + rnd(ATMO.puddleEvery) * 1000;
-      S.puddles.push({ x: S.range.x1 - 6, y: 0, w: rnd(ATMO.puddleW), hit: false });
+      const x = S.range.x1 - 6;
+      if (!spawnClear(x)) {
+        S.nextPuddle = t + 600;
+      } else {
+        S.nextPuddle = t + rnd(ATMO.puddleEvery) * 1000;
+        S.puddles.push({ x, y: 0, w: rnd(ATMO.puddleW), hit: false });
+      }
     }
     for (let i = S.puddles.length - 1; i >= 0; i--) {
       const p = S.puddles[i];
@@ -949,14 +989,22 @@
 
   function updateTumbleweeds(dt, t, active) {
     if (active && t > S.nextTumble && S.tumbleweeds.length < 1) {
-      S.nextTumble = t + rnd(ATMO.tumbleEvery) * 1000;
-      S.tumbleweeds.push({ x: S.range.x1 + 20, y: 0, angle: 0, r: 8 + Math.random() * 5 });
+      const x = S.range.x1 + 20;
+      if (!spawnClear(x)) {
+        S.nextTumble = t + 600;
+      } else {
+        S.nextTumble = t + rnd(ATMO.tumbleEvery) * 1000;
+        S.tumbleweeds.push({ x, y: 0, angle: 0, r: 8 + Math.random() * 5 });
+      }
     }
     for (let i = S.tumbleweeds.length - 1; i >= 0; i--) {
       const w = S.tumbleweeds[i];
-      const vx = S.drift.px * 1.25 + rnd(ATMO.tumbleSpeedExtra);
-      w.x -= vx * dt;
-      w.angle -= vx * dt / Math.max(4, w.r);
+      // Same drift as hurdles/puddles — otherwise the faster tumbleweed
+      // catches up to them AFTER a clean spawn (SPAWN_GAP doesn't catch
+      // this, since it only checks the moment of spawning, not later
+      // movement).
+      w.x -= S.drift.px * dt;
+      w.angle -= S.drift.px * dt / Math.max(4, w.r);
       const y = yAt(w.x);
       if (y !== null) w.y = y - w.r * 0.6;
       if (w.x < S.range.x0 - 60) S.tumbleweeds.splice(i, 1);
@@ -964,7 +1012,7 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  Косметика: раз на раунд шанс на аксесуар
+   *  Cosmetics: a per-round chance at an accessory
    * ------------------------------------------------------------------ */
 
   function pickCosmetic() {
@@ -978,7 +1026,7 @@
     const R = S.runner;
     const left = roundSecondsLeft(t);
 
-    // таймер стрибнув угору — новий раунд
+    // the timer jumped up — new round
     if (left !== null && S.round.prev !== null && left > S.round.prev + 5) {
       beginFall(R);
     }
@@ -986,7 +1034,7 @@
 
     if (!R.alive) beginFall(R);
 
-    // страховка: не встиг добігти, а раунд кінчається — пірнаємо звідки є
+    // safety net: didn't make it in time and the round is ending — dive from wherever
     if (left !== null && left <= 1 && R.sprint && R.state !== 'dive' && R.state !== 'gone') {
       beginDive(R);
     }
@@ -1016,9 +1064,9 @@
         R.x += R.jumpVx * dt;
         R.cycleGain += R.jumpVx * dt;
 
-        // приземлення там, де дуга реально перетинає лінію (а не на висоті
-        // відштовхування — інакше на сходинку не залізти); jumpV > 0 виключає
-        // хибне приземлення на кадрі з dt = 0
+        // land where the arc actually crosses the line (not at takeoff
+        // height — otherwise it could never climb a step up); jumpV > 0
+        // rules out a false landing on a dt = 0 frame
         const gLand = yAt(R.x);
         const yNow = R.groundY + R.jumpOff;
         const landed = gLand !== null ? yNow >= gLand : R.jumpOff >= 0;
@@ -1027,7 +1075,17 @@
           R.jumpOff = 0;
           R.vFall = 0;
           spawnDust(R.x - 3, R.y, 1);
-          R.state = R.resume; // повертаємось туди, звідки стрибнули
+          R.state = R.resume; // back to whatever state we jumped from
+
+          // Any hurdle the arc flew over but that wasn't the one this jump
+          // targeted (e.g. a second hurdle, or a jump triggered by a terrain
+          // wall) is now behind the feet. Left unmarked, the very next frame
+          // sees it as "just ahead" (hurdleAhead tolerates a few px behind)
+          // and instantly trips into it — reading as the character
+          // teleporting onto an obstacle it had already cleared in the air.
+          for (const h of S.hurdles) {
+            if (!h.done && !h.knock && h.x <= R.x + 6) h.done = true;
+          }
         }
         break;
       }
@@ -1093,25 +1151,25 @@
       default: {
         // walk | run
         if (R.sprint) {
-          // швидкість підбираємо так, щоб долетіти до вістря саме під кінець
+          // speed is tuned to arrive at the tip right at the end
           const timeLeft = Math.max(0.8, (left ?? B.sprintAt) - B.diveLead);
           R.speed = clamp((S.range.x1 - R.x) / timeLeft, 60, B.sprintMax);
         } else {
           R.speed = R.baseSpeed * cfg.speed;
         }
-        // на ривку схил не гальмує — інакше не встигав добігти за 10с
+        // slope doesn't slow the dash — otherwise it couldn't make it in 10s
         const eff = R.sprint
           ? R.speed
           : R.speed * clamp(1 + S.slope * 0.45, 0.55, 1.5);
         R.x += eff * dt;
         R.cycleGain += eff * dt;
 
-        // виходимо одразу, якщо змінили стан — інакше перевірка цілі нижче
-        // переведе у відпочинок просто в повітрі
+        // bail out immediately if the state changed — otherwise the goal
+        // check below would switch to resting mid-air
         if (tryHurdle(R)) break;
 
-        // стрибаємо тільки перестрибну стінку; надто високу видряпуємось,
-        // інакше застрягнемо в нескінченному стрибанні перед нею
+        // only jump a wall we can actually clear; climb anything taller,
+        // or we'd get stuck hopping in place forever in front of it
         const u = unitPx();
         const wall = wallAhead(R);
         if (
@@ -1124,7 +1182,7 @@
           break;
         }
 
-        // добіг майже до вістря, а раунд ще не закінчується — дме вітер
+        // reached almost the tip while the round isn't over yet — wind kicks in
         if (!R.sprint && R.x >= S.range.x1 - B.windMargin) {
           beginWind(R);
           break;
@@ -1153,9 +1211,9 @@
     R.pct = ((R.x - S.range.x0) / span) * 100;
 
     if (R.state !== 'fall' && R.state !== 'dive') {
-      // земля береться не миттєво, а згладжено: падаємо/видряпуємось, замість
-      // перескоку на нову висоту при різкому русі ціни. У стрибку рівень
-      // заморожений на точці відштовхування.
+      // ground height isn't taken instantly but smoothed: we fall or climb
+      // instead of snapping to a new height on a sharp price move. During a
+      // jump the level is frozen at the takeoff point.
       const g = yAt(R.x);
       if (g !== null && R.state !== 'jump') {
         const u = unitPx();
@@ -1184,7 +1242,7 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  Головний цикл
+   *  Main loop
    * ------------------------------------------------------------------ */
 
   function frame(t) {
@@ -1211,10 +1269,10 @@
       if (S.line) {
         S.status = 'ok';
         S.reason = '';
-        if (cfg.debug) console.log(TAG, 'колір лінії', S.line);
+        if (cfg.debug) console.log(TAG, 'line color', S.line);
       } else if (S.status !== 'error') {
         S.status = 'searching';
-        S.reason = 'лінію ще не видно на графіку';
+        S.reason = "the line isn't visible on the chart yet";
       }
     }
     if (!S.line) return;
@@ -1262,7 +1320,7 @@
     let targetAngle;
     let snap = 0.002;
     if (R.state === 'dive') {
-      // голова дивиться рівно за вектором швидкості: θ = atan2(vx, -vy)
+      // the head points exactly along the velocity vector: θ = atan2(vx, -vy)
       targetAngle = clamp(Math.atan2(R.vx, -R.vy), -0.7, 3.0);
       snap = 0.02;
     } else if (R.state === 'fall') {
@@ -1291,7 +1349,7 @@
     } else if (R.state === 'trip') {
       R.phase += (R.tripPhase === 'hurt' ? 3 : 14) * dt;
     } else if (R.state === 'wind') {
-      R.phase += 24 * dt; // біжить на місці, а вітер зносить назад
+      R.phase += 24 * dt; // running in place while the wind carries it back
     } else if (R.state === 'rest') {
       const sp = { peck: 7, look: 1.6, flap: 9, scratch: 8 }[R.gag] || 0;
       R.phase += sp * dt;
@@ -1314,9 +1372,14 @@
         knock: h.knock,
         alpha: h.alpha,
         scale: cfg.scale,
+        tint: h.tint,
       });
     }
     if (R.state === 'gone') return;
+    if (R.groundY !== null && R.state !== 'fall' && R.state !== 'dive') {
+      const height = R.state === 'jump' ? -R.jumpOff : 0;
+      window.XOChicken.drawShadow(ctx, R.x, R.groundY, height, cfg.scale);
+    }
     const shown =
       R.state === 'trip'
         ? R.tripPhase
@@ -1351,11 +1414,11 @@
   }
 
   /* ------------------------------------------------------------------ *
-   *  Стеження за DOM / SPA-навігацією
+   *  Watching the DOM / SPA navigation
    * ------------------------------------------------------------------ */
 
-  // Сторінка постійно смикає DOM (тікери цін), тому MutationObserver з
-  // debounce ніколи б не спрацював — перевіряємо за таймером.
+  // The page constantly churns the DOM (price tickers), so a debounced
+  // MutationObserver would never settle — we poll on a timer instead.
   function watch() {
     const c = findChartCanvas();
     if (c && c !== S.src) attach(c);
@@ -1368,11 +1431,12 @@
   S.raf = requestAnimationFrame(frame);
 
   /* ------------------------------------------------------------------ *
-   *  Налаштування
+   *  Settings
    * ------------------------------------------------------------------ */
 
-  // для налагодження з консолі; у розширенні DevTools — окремий контекст,
-  // треба перемкнути випадайку зверху консолі на «XO Pulse Runner»
+  // for debugging from the console; in the extension, DevTools runs a
+  // separate context — switch the dropdown at the top of the console to
+  // "XO Pulse Runner"
   window.__xoRunnerCfg = cfg;
   window.__xoRunnerState = S;
 

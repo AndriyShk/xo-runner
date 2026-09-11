@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "XO Pulse Runner",
   "version": "1.0.0",
-  "description": "Персонаж бігає по лінії живого графіка на xo.market/pulse: стрибає через перешкоди, втомлюється, у кінці раунду пірнає щучкою.",
+  "description": "A character runs along the live chart line on xo.market/pulse: jumps hurdles, gets tired, dives at the end of the round.",
   "permissions": [
     "storage"
   ],

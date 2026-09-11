@@ -1,51 +1,82 @@
 <!doctype html>
-<html lang="uk">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>XO Pulse Runner — іконка</title>
+    <title>XO Pulse Runner — icon</title>
     <style>
       body { margin: 0; padding: 20px; background: #f3f4f6; font: 12px sans-serif; }
       .row { display: flex; gap: 20px; align-items: flex-end; }
       canvas { background: transparent; image-rendering: pixelated; }
       .cell { text-align: center; }
-      .chk { background: #dbeafe; }
     </style>
   </head>
   <body>
     <div class="row" id="row"></div>
-    <script src="../src/character.js"></script>
     <script>
-      // Стоїть у профіль-3/4, крило трохи розкинуте — читається на маленькому
-      // розмірі краще, ніж будь-яка з циклових поз бігу.
-      function drawIcon(size, checker) {
+      // A detailed illustration turns to mud below ~32px — thin outlines and
+      // small details (badge, toes, feather edges) merge into noise. So the
+      // icon is a purpose-built mark, not a scaled-down character render:
+      // a bold flat head-and-comb silhouette on a colored badge, with no
+      // strokes at all — only a handful of solid shapes, so it survives
+      // downscaling to 16px.
+      function drawIcon(size) {
         const cv = document.createElement('canvas');
-        cv.width = size; cv.height = size;
+        cv.width = size;
+        cv.height = size;
         const ctx = cv.getContext('2d');
-        if (checker) {
-          const n = 8;
-          for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-            ctx.fillStyle = (x + y) % 2 ? '#e5e7eb' : '#ffffff';
-            ctx.fillRect((x * size) / n, (y * size) / n, size / n, size / n);
-          }
-        }
-        // Виміряний bbox персонажа (стан 'look', scale=1): 33.4×50 локальних
-        // одиниць, центр відносно лап (0,0) — (-7.7, -23.7). Звідси
-        // походять множники нижче: заповнюємо 88% висоти й центруємо bbox,
-        // а не точку опори лап, інакше він їде вбік через хвіст і крило.
-        const scale = (0.88 * size) / 50 / 0.78;
-        const s = scale * 0.78;
-        const originX = size / 2 - s * -7.7;
-        const originY = size / 2 - s * -23.7;
-        XOChicken.draw(ctx, {
-          x: originX,
-          y: originY,
-          dir: 1,
-          state: 'look',
-          phase: 0,
-          t: 0.3,
-          scale,
-          angle: 0,
-        });
+        const s = size;
+
+        // rounded-square badge background
+        const r = s * 0.22;
+        ctx.fillStyle = '#8479e4';
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.lineTo(s - r, 0);
+        ctx.arcTo(s, 0, s, r, r);
+        ctx.lineTo(s, s - r);
+        ctx.arcTo(s, s, s - r, s, r);
+        ctx.lineTo(r, s);
+        ctx.arcTo(0, s, 0, s - r, r);
+        ctx.lineTo(0, r);
+        ctx.arcTo(0, 0, r, 0, r);
+        ctx.closePath();
+        ctx.fill();
+
+        // comb — three chunky points, not the fine six-point wave used on
+        // the full character (that many points disappears at small sizes)
+        ctx.fillStyle = '#f2718f';
+        ctx.beginPath();
+        ctx.moveTo(0.22 * s, 0.37 * s);
+        ctx.lineTo(0.27 * s, 0.11 * s);
+        ctx.lineTo(0.35 * s, 0.32 * s);
+        ctx.lineTo(0.41 * s, 0.07 * s);
+        ctx.lineTo(0.48 * s, 0.3 * s);
+        ctx.lineTo(0.53 * s, 0.12 * s);
+        ctx.lineTo(0.58 * s, 0.35 * s);
+        ctx.closePath();
+        ctx.fill();
+
+        // head — single bold blob
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.ellipse(0.42 * s, 0.54 * s, 0.32 * s, 0.3 * s, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // beak
+        ctx.fillStyle = '#ff9a1f';
+        ctx.beginPath();
+        ctx.moveTo(0.6 * s, 0.47 * s);
+        ctx.lineTo(0.95 * s, 0.53 * s);
+        ctx.lineTo(0.6 * s, 0.63 * s);
+        ctx.closePath();
+        ctx.fill();
+
+        // eye — one solid dot, no white sclera (too fine at 16px)
+        ctx.fillStyle = '#1c1c1c';
+        ctx.beginPath();
+        ctx.arc(0.46 * s, 0.48 * s, 0.07 * s, 0, Math.PI * 2);
+        ctx.fill();
+
         return cv;
       }
 
@@ -53,7 +84,7 @@
       for (const size of [128, 48, 16]) {
         const cell = document.createElement('div');
         cell.className = 'cell';
-        const cv = drawIcon(size, true);
+        const cv = drawIcon(size);
         cv.style.width = Math.max(size, 64) + 'px';
         cv.style.height = Math.max(size, 64) + 'px';
         cv.id = 'icon' + size;
@@ -64,10 +95,7 @@
         row.appendChild(cell);
       }
 
-      window.__exportIcon = (size) => {
-        const cv = drawIcon(size, false);
-        return cv.toDataURL('image/png');
-      };
+      window.__exportIcon = (size) => drawIcon(size).toDataURL('image/png');
     </script>
   </body>
 </html>

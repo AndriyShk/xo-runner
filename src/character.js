@@ -1,6 +1,6 @@
 /*
- * XO-півень: векторний персонаж. Локальні координати — лапи в (0,0),
- * дивиться праворуч, зріст ≈ 50 одиниць. Дзеркалення — через dir = -1.
+ * XO Chicken: a vector character. Local coordinates — feet at (0,0),
+ * facing right, height ≈ 50 units. Mirroring is done via dir = -1.
  */
 window.XOChicken = (() => {
   'use strict';
@@ -24,12 +24,21 @@ window.XOChicken = (() => {
     star: '#ffd23f',
   };
 
-  const LW = 0.66; // товщина контуру, ~1.3% зросту
+  // A little color variety per hurdle so a row of them doesn't read as
+  // the same cutout repeated — picked by a stable per-hurdle tint (0..1).
+  const HURDLE_PALETTE = [
+    { post: '#9aa0aa', bar: '#f2718f', flag: '#e2536f' },
+    { post: '#a3968a', bar: '#f7a94f', flag: '#dc7e1d' },
+    { post: '#93a4ab', bar: '#7ecbe8', flag: '#4a9fc4' },
+    { post: '#a6a08f', bar: '#9fd67e', flag: '#5fa63e' },
+  ];
+
+  const LW = 0.66; // outline thickness, ~1.3% of height
 
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
   /* -------------------------------------------------------------- *
-   *  Примітиви
+   *  Primitives
    * -------------------------------------------------------------- */
 
   function outlined(ctx, path, fill, lw) {
@@ -43,7 +52,7 @@ window.XOChicken = (() => {
     ctx.stroke();
   }
 
-  /** Кінцівка: товстий штрих із чорною обводкою. */
+  /** A limb: a thick stroke with a black outline. */
   function limb(ctx, pts, w, fill) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -59,13 +68,13 @@ window.XOChicken = (() => {
   }
 
   /* -------------------------------------------------------------- *
-   *  Пози
+   *  Poses
    * -------------------------------------------------------------- */
 
   const HIP = { x: 0, y: -12.5 };
   const SHO = { x: -0.5, y: -26 };
 
-  /** p — фаза циклу кроку, br — фаза дихання. */
+  /** p — step-cycle phase, br — breathing phase. */
   function pose(state, p, br) {
     if (state === 'jump') {
       return {
@@ -188,8 +197,8 @@ window.XOChicken = (() => {
     }
 
     if (state === 'wind') {
-      // вітер зносить назад, а він досі перебирає лапами вперед — тіло
-      // відкинуте проти вітру, крило і хвіст майорять
+      // the wind carries it backward while it's still pumping its legs
+      // forward — body leaned back against the wind, wing and tail streaming
       const stride = 5.6;
       const lift = 3.4;
       const foot = (ph) => ({
@@ -208,8 +217,8 @@ window.XOChicken = (() => {
     }
 
     if (state === 'dive') {
-      // pivot: тіло крутиться навколо своєї середини, а не навколо лап —
-      // інакше при розвороті головою вниз його зносить убік
+      // pivot: the body rotates around its own middle, not around the
+      // feet — otherwise turning head-down would send it sliding sideways
       return {
         lean: 0,
         bob: 0,
@@ -218,10 +227,10 @@ window.XOChicken = (() => {
           { x: -1.2, y: 3.6 },
           { x: 1.4, y: 4.6 },
         ],
-        // два вужчі крила обабіч голови, щоб вона читалась між ними
+        // two narrower wings flank the head so it still reads between them
         wing: { ang: -1.62, len: 19, w: 3.1, bx: 6, by: -26 },
         wing2: { ang: -1.48, len: 20, w: 3, bx: 0.5, by: -26 },
-        wingOnTop: true, // ближнє крило йде поверх голови
+        wingOnTop: true, // the near wing is drawn on top of the head
         puff: 0,
         head: { rot: 0 },
       };
@@ -258,8 +267,8 @@ window.XOChicken = (() => {
     const run = state === 'run';
     const stride = run ? 6.4 : 3.6;
     const lift = run ? 4.6 : 1.7;
-    // опорна лапа йде вперед→назад, махова — назад→вперед; переплутати
-    // напрями = персонаж крокує задом наперед
+    // the planted foot moves forward→back, the swinging one back→forward;
+    // swap the directions and the character walks backward
     const foot = (ph) => ({
       x: Math.cos(ph) * stride,
       y: -Math.max(0, -Math.sin(ph)) * lift,
@@ -280,7 +289,7 @@ window.XOChicken = (() => {
   }
 
   /* -------------------------------------------------------------- *
-   *  Частини тіла
+   *  Body parts
    * -------------------------------------------------------------- */
 
   function feather(ctx, bx, by, a, len, w, fill) {
@@ -379,7 +388,7 @@ window.XOChicken = (() => {
   function head(ctx, tired, beakOpen, blink, dazed) {
     const cy = -36.5;
 
-    // гребінь — замкнута «хвиля» з трьох язиків
+    // comb — a closed 'wave' made of three points
     outlined(ctx, (c) => {
       c.moveTo(-3.8, cy - 5.6);
       c.quadraticCurveTo(-5.4, cy - 12.6, -2.2, cy - 11.4);
@@ -389,7 +398,7 @@ window.XOChicken = (() => {
       c.quadraticCurveTo(0.4, cy - 8.4, -3.8, cy - 5.6);
     }, C.comb);
 
-    // голова з «спідницею» з пір'я знизу
+    // head with a feathered 'skirt' along the bottom
     outlined(ctx, (c) => {
       c.moveTo(-6.8, cy + 2);
       c.quadraticCurveTo(-6.9, cy - 7.2, 0, cy - 7.4);
@@ -402,7 +411,7 @@ window.XOChicken = (() => {
       }
     }, C.head);
 
-    // дзьоб
+    // beak
     const open = beakOpen * 1.7;
     outlined(ctx, (c) => {
       c.moveTo(4.8, cy - 1.0 - open * 0.3);
@@ -415,14 +424,14 @@ window.XOChicken = (() => {
       c.lineTo(5.0, cy + 2.9 + open * 0.5);
     }, C.beak);
 
-    // борідка
+    // wattle
     outlined(ctx, (c) => {
       c.moveTo(4.9, cy + 2.6 + open * 0.5);
       c.quadraticCurveTo(3.9, cy + 6.6 + open, 5.5, cy + 6.8 + open);
       c.quadraticCurveTo(6.6, cy + 5.0 + open, 6.2, cy + 2.4 + open * 0.5);
     }, C.wattle);
 
-    // очі
+    // eyes
     const eyes = [
       { x: 0.2, y: cy - 1.4, r: 2.6 },
       { x: 4.2, y: cy - 1.6, r: 2.3 },
@@ -472,10 +481,10 @@ window.XOChicken = (() => {
   }
 
   /* -------------------------------------------------------------- *
-   *  Публічний малювальник
+   *  Public drawing entry point
    * -------------------------------------------------------------- */
 
-  /** o: {x, y, dir, state, phase, t, scale, angle}; angle — нахил землі. */
+  /** o: {x, y, dir, state, phase, t, scale, angle}; angle — ground tilt. */
   function draw(ctx, o) {
     const s = (o.scale || 1) * 0.78;
     const dir = o.dir >= 0 ? 1 : -1;
@@ -485,8 +494,8 @@ window.XOChicken = (() => {
     const br = t * (state === 'rest' ? 6.5 : 3);
     const P = pose(state, o.phase || 0, br);
 
-    // лапи підлаштовуються під схил частково (K); у польоті/трипі тулуб — одна
-    // суцільна лінія з лапами, окремий нахил не потрібен
+    // legs only partly follow the slope (K); mid-jump/trip the torso is
+    // one rigid piece with the legs, no separate lean needed
     const rigid =
       state === 'dive' || state === 'trip' || state === 'hurt' || state === 'rise';
     const legTilt = rigid ? ground : ground * 0.55;
@@ -576,7 +585,7 @@ window.XOChicken = (() => {
 
     ctx.restore();
 
-    // малюємо поза transform персонажа, щоб зірочки не крутились разом із тілом
+    // drawn outside the character's transform so the stars don't spin along with the body
     if (P.dazed) {
       ctx.save();
       ctx.translate(o.x, o.y - 30 * s);
@@ -608,18 +617,21 @@ window.XOChicken = (() => {
   }
 
   /* -------------------------------------------------------------- *
-   *  Косметика: раз на раунд шанс на окуляри чи квітку
+   *  Cosmetics: a per-round chance at sunglasses or a flower
    * -------------------------------------------------------------- */
 
   function drawCosmetic(ctx, kind) {
     const cy = -36.5;
     if (kind === 'shades') {
-      // лінзи трохи більші за самі очі (r 2.6/2.3), але не зливаються між
-      // собою — інакше замість двох лінз виходить суцільна чорна пляма
+      // lenses are a bit bigger than the eyes themselves (r 2.6/2.3), but
+      // don't merge together — otherwise two lenses become one black blob.
+      // A mid-tone rim (not the same near-black as the fill) plus a glass
+      // highlight are what actually read as "glasses" instead of just
+      // solid dark eyes — without them it's indistinguishable from a blink.
       const lensL = { x: 0.2, y: cy - 1.4 };
       const lensR = { x: 4.2, y: cy - 1.6 };
       ctx.fillStyle = '#23262c';
-      ctx.strokeStyle = C.line;
+      ctx.strokeStyle = '#5b5f6a';
       ctx.lineWidth = LW;
       for (const e of [lensL, lensR]) {
         ctx.beginPath();
@@ -627,6 +639,7 @@ window.XOChicken = (() => {
         ctx.fill();
         ctx.stroke();
       }
+      ctx.strokeStyle = '#5b5f6a';
       ctx.beginPath();
       ctx.moveTo(lensL.x + 1.8, lensL.y);
       ctx.lineTo(lensR.x - 1.8, lensR.y);
@@ -635,6 +648,16 @@ window.XOChicken = (() => {
       ctx.moveTo(lensR.x + 1.8, lensR.y);
       ctx.lineTo(lensR.x + 4, lensR.y - 1.4);
       ctx.stroke();
+      // glass highlight — a short bright streak on each lens
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = LW * 0.9;
+      ctx.lineCap = 'round';
+      for (const e of [lensL, lensR]) {
+        ctx.beginPath();
+        ctx.moveTo(e.x - 0.9, e.y - 0.75);
+        ctx.lineTo(e.x - 0.1, e.y - 1.1);
+        ctx.stroke();
+      }
       return;
     }
     if (kind === 'flower') {
@@ -662,62 +685,110 @@ window.XOChicken = (() => {
   }
 
   /* -------------------------------------------------------------- *
-   *  Дрібні події на лінії
+   *  Small line events
    * -------------------------------------------------------------- */
 
-  /** Калюжа: пласка пляма на лінії, персонаж хляпає по ній, коли пробігає. */
+  /** Puddle: a flat spot on the line; the character splashes through it. */
   function drawPuddle(ctx, o) {
+    const w = (o.w || 30) / 2;
     ctx.save();
     ctx.globalAlpha = 0.5;
     ctx.fillStyle = '#bcdcf2';
     ctx.strokeStyle = '#8fb9d6';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(o.x, o.y + 2, (o.w || 30) / 2, 3.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(o.x, o.y + 2, w, 3.2, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
+    // a thin bright streak — a lazy hint of sky reflection, not a literal one
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = '#eef7ff';
+    ctx.lineWidth = 0.9;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(o.x - w * 0.45, o.y + 1.2);
+    ctx.lineTo(o.x + w * 0.1, o.y + 1.2);
     ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.restore();
   }
 
-  /** Перекотиполе: котиться по лінії незалежно від персонажа. */
+  // A stable pseudo-random keyed by index — the tumbleweed's twigs are the
+  // same every frame (no flicker), but chaotic rather than symmetric.
+  function hash01(n) {
+    const s = Math.sin(n * 12.9898) * 43758.5453;
+    return s - Math.floor(s);
+  }
+
+  /** Tumbleweed: a tangle of twigs, rolls along the line independently of the character. */
   function drawTumbleweed(ctx, o) {
     const r = o.r || 10;
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.rotate(o.angle || 0);
-    ctx.strokeStyle = '#9c8a5e';
-    ctx.fillStyle = 'rgba(156,138,94,0.25)';
-    ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(156,138,94,0.18)';
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.stroke();
-    for (let i = 0; i < 5; i++) {
-      const a = (i * Math.PI) / 5;
+    // Twigs are short segments between random points inside the circle,
+    // NOT straight lines through the center — otherwise instead of a
+    // tangle you get even spokes, and it reads as a wheat ear or a wheel
+    // rather than a bush.
+    ctx.strokeStyle = '#8a7550';
+    ctx.lineWidth = 0.9;
+    ctx.lineCap = 'round';
+    const N = 12;
+    for (let i = 0; i < N; i++) {
+      const a1 = hash01(i * 2 + 1) * Math.PI * 2;
+      const a2 = hash01(i * 2 + 2) * Math.PI * 2;
+      const r1 = r * (0.15 + hash01(i * 3 + 1) * 0.55);
+      const r2 = r * (0.55 + hash01(i * 3 + 2) * 0.45);
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-      ctx.lineTo(-Math.cos(a) * r, -Math.sin(a) * r);
+      ctx.moveTo(Math.cos(a1) * r1, Math.sin(a1) * r1);
+      ctx.lineTo(Math.cos(a2) * r2, Math.sin(a2) * r2);
       ctx.stroke();
     }
     ctx.restore();
   }
 
   /* -------------------------------------------------------------- *
-   *  Перешкода
+   *  Grounding shadow — shared by the runner and the hurdles so both
+   *  read as sitting on the line instead of floating over it.
    * -------------------------------------------------------------- */
 
-  /** knock: 0..1 — наскільки бар'єр завалений. */
+  /** height — how far above the ground (units), 0 when grounded. */
+  function drawShadow(ctx, x, groundY, height, scale) {
+    const s = (scale || 1) * 0.78;
+    const shrink = clamp(1 - Math.max(0, height) / 50, 0.3, 1);
+    ctx.save();
+    ctx.globalAlpha = 0.24 * shrink;
+    ctx.fillStyle = '#1c1c1c';
+    ctx.beginPath();
+    ctx.ellipse(x, groundY + 1.6 * s, 7.5 * s * shrink, 2 * s * shrink, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /* -------------------------------------------------------------- *
+   *  Hurdle
+   * -------------------------------------------------------------- */
+
+  /** knock: 0..1 — how far the hurdle has toppled. */
   function drawHurdle(ctx, o) {
     const s = (o.scale || 1) * 0.78;
+    const alpha = o.alpha ?? 1;
+    const pal = HURDLE_PALETTE[Math.floor((o.tint || 0) * HURDLE_PALETTE.length) % HURDLE_PALETTE.length];
+
+    drawShadow(ctx, o.x, o.y, 0, o.scale);
+
     ctx.save();
-    ctx.globalAlpha = o.alpha ?? 1;
+    ctx.globalAlpha = alpha;
     ctx.translate(o.x, o.y);
     ctx.rotate(o.angle || 0);
     ctx.scale(s, s);
     if (o.knock) {
-      // обертаємо навколо нижнього краю й підіймаємо на пів товщини,
-      // щоб збитий бар'єр ліг на лінію, а не пішов під неї
+      // rotate around the bottom edge and lift by half the thickness, so a
+      // knocked-over hurdle lies on the line instead of sinking under it
       const k = o.knock;
       ctx.rotate(k * 1.5);
       ctx.translate(0, -k * 6.6);
@@ -725,8 +796,8 @@ window.XOChicken = (() => {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    limb(ctx, [{ x: -6.2, y: 0 }, { x: -3.4, y: -18 }], 1.9, C.post);
-    limb(ctx, [{ x: 6.2, y: 0 }, { x: 3.4, y: -18 }], 1.9, C.post);
+    limb(ctx, [{ x: -6.2, y: 0 }, { x: -3.4, y: -18 }], 1.9, pal.post);
+    limb(ctx, [{ x: 6.2, y: 0 }, { x: 3.4, y: -18 }], 1.9, pal.post);
     outlined(
       ctx,
       (c) => {
@@ -735,11 +806,22 @@ window.XOChicken = (() => {
         c.lineTo(7.4, -15.4);
         c.lineTo(-7.4, -15.4);
       },
-      C.bar
+      pal.bar
+    );
+    // a small pennant on the near post — otherwise a plain bar reads flat
+    outlined(
+      ctx,
+      (c) => {
+        c.moveTo(-7.4, -19.6);
+        c.lineTo(-7.4, -25.6);
+        c.lineTo(-3.2, -22);
+      },
+      pal.flag,
+      0.5
     );
     ctx.globalAlpha = 1;
     ctx.restore();
   }
 
-  return { draw, drawHurdle, drawPuddle, drawTumbleweed, colors: C };
+  return { draw, drawHurdle, drawPuddle, drawTumbleweed, drawShadow, colors: C };
 })();
